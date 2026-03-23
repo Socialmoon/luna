@@ -1,10 +1,10 @@
 "use client";
 
 import { FormEvent, Suspense, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
+import { getSafeAdminRedirect } from "@/lib/admin-auth-redirect";
 
 function AdminLoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -28,9 +28,8 @@ function AdminLoginForm() {
         throw new Error(data.error ?? "Login failed.");
       }
 
-      const redirectTo = searchParams.get("redirect") || "/leads";
-      router.replace(redirectTo);
-      router.refresh();
+      const redirectTo = getSafeAdminRedirect(searchParams.get("redirect"));
+      window.location.assign(redirectTo);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed.");
     } finally {

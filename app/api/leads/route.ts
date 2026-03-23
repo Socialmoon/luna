@@ -1,15 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAdminAuthenticated } from "@/lib/admin-auth";
+import { normalizeEmail, normalizePhone, sanitizeLeadContact } from "@/lib/contact-validation";
 import { createAdminClient } from "@/lib/supabase/admin";
+
+function jsonWithSecurityHeaders(body: Record<string, unknown>, init?: ResponseInit) {
+  const response = NextResponse.json(body, init);
+  response.headers.set("Cache-Control", "no-store, max-age=0");
+  response.headers.set("Pragma", "no-cache");
+  response.headers.set("X-Frame-Options", "DENY");
+  return response;
+}
 
 export async function GET() {
   if (!(await isAdminAuthenticated())) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return jsonWithSecurityHeaders({ error: "Unauthorized" }, { status: 401 });
   }
 
   const admin = createAdminClient();
   if (!admin) {
-    return NextResponse.json({ error: "Supabase is not configured." }, { status: 503 });
+    return jsonWithSecurityHeaders({ error: "Supabase is not configured." }, { status: 503 });
   }
 
   const { data, error } = await admin
@@ -19,27 +28,27 @@ export async function GET() {
     .limit(200);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return jsonWithSecurityHeaders({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ sessions: data });
+  return jsonWithSecurityHeaders({ sessions: (data ?? []).map((session) => sanitizeLeadContact(session)) });
 }
 
 export async function POST(req: NextRequest) {
   if (!(await isAdminAuthenticated())) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return jsonWithSecurityHeaders({ error: "Unauthorized" }, { status: 401 });
   }
 
   const admin = createAdminClient();
   if (!admin) {
-    return NextResponse.json({ error: "Supabase is not configured." }, { status: 503 });
+    return jsonWithSecurityHeaders({ error: "Supabase is not configured." }, { status: 503 });
   }
 
   const body = await req.json().catch(() => null);
   const sessionId = typeof body?.sessionId === "string" ? body.sessionId.trim().slice(0, 128) : "";
 
   if (!sessionId) {
-    return NextResponse.json({ error: "sessionId is required." }, { status: 400 });
+    return jsonWithSecurityHeaders({ error: "sessionId is required." }, { status: 400 });
   }
 
   const payload = {
@@ -54,7 +63,7 @@ export async function POST(req: NextRequest) {
     .maybeSingle();
 
   if (existingError) {
-    return NextResponse.json({ error: existingError.message }, { status: 500 });
+    return jsonWithSecurityHeaders({ error: existingError.message }, { status: 500 });
   }
 
   payload.latest_topic =
@@ -71,12 +80,12 @@ export async function POST(req: NextRequest) {
       : existing?.visitor_name ?? null;
   payload.visitor_email =
     typeof body?.visitorEmail === "string" && body.visitorEmail.trim()
-      ? body.visitorEmail
-      : existing?.visitor_email ?? null;
+      ? normalizeEmail(body.visitorEmail)
+      : normalizeEmail(existing?.visitor_email) ?? null;
   payload.visitor_phone =
     typeof body?.visitorPhone === "string" && body.visitorPhone.trim()
-      ? body.visitorPhone
-      : existing?.visitor_phone ?? null;
+      ? normalizePhone(body.visitorPhone)
+      : normalizePhone(existing?.visitor_phone) ?? null;
   payload.negotiation_detected = Boolean(body?.negotiationDetected) || Boolean(existing?.negotiation_detected);
 
   const { data, error } = await admin
@@ -86,8 +95,8 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return jsonWithSecurityHeaders({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ session: data });
+  return jsonWithSecurityHeaders({ session: data ? sanitizeLeadContact(data) : null });
 }

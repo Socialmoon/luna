@@ -97,10 +97,19 @@ function normalizeLanguageTag(language: string | undefined) {
   return language.toLowerCase().startsWith("hi") ? "hi-IN" : "en-US";
 }
 
-function detectMessageLanguage(text: string) {
-  if (/[\u0900-\u097F]/.test(text)) return "hi-IN";
-  if (/\b(namaste|haan|nahi|kya|kaise|mujhe|chahiye|madad)\b/i.test(text)) return "hi-IN";
-  return "en-US";
+function detectMessageLanguage(text: string, fallbackLanguage = "en-US") {
+  const hasDevanagari = /[\u0900-\u097F]/.test(text);
+  const hasLatinWords = /\b[A-Za-z]{2,}\b/.test(text);
+  const romanizedHindi =
+    /\b(namaste|haan|nahi|kya|kaise|mujhe|aap|mera|main|madad|chahiye|samajh|karna|kripya|dhanyavaad|shukriya|theek|thik)\b/i.test(
+      text
+    );
+
+  if (hasDevanagari && hasLatinWords) return "hi-IN";
+  if (hasDevanagari) return "hi-IN";
+  if (romanizedHindi) return "hi-IN";
+  if (hasLatinWords) return "en-US";
+  return fallbackLanguage;
 }
 
 function getLanguageLabel(language: string) {
@@ -195,6 +204,10 @@ export default function ChatPage() {
   const speechUnlockAttemptedRef = useRef(false);
   const speechEnergyDecayTimerRef = useRef<number | null>(null);
   const lastBoundaryTimeRef = useRef(0);
+  const voicePhaseRef = useRef<VoicePhase>("idle");
+  const latestAssistantSpeechRef = useRef("");
+  const speakingListenDelayTimerRef = useRef<number | null>(null);
+  const interruptionHandledRef = useRef(false);
 
   function createFreshSession() {
     const freshSessionId = crypto.randomUUID();
@@ -233,6 +246,26 @@ export default function ChatPage() {
   }, [activeLanguage]);
 
   useEffect(() => {
+    voicePhaseRef.current = voicePhase;
+  }, [voicePhase]);
+
+  function normalizeForVoiceMatch(text: string) {
+    return text
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function isLikelyAssistantEcho(text: string) {
+    const spoken = normalizeForVoiceMatch(latestAssistantSpeechRef.current);
+    const heard = normalizeForVoiceMatch(text);
+
+    if (!spoken || !heard || heard.length < 14) return false;
+    return spoken.includes(heard);
+  }
+
+  useEffect(() => {
     const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
     const canSpeak = typeof window !== "undefined" && "speechSynthesis" in window;
 
@@ -261,7 +294,17 @@ export default function ChatPage() {
       }
 
       transcriptBufferRef.current = finalText;
-      setInterimTranscript(`${finalText} ${interim}`.trim());
+      const combined = `${finalText} ${interim}`.trim();
+      setInterimTranscript(combined);
+
+      const isSpeaking = voicePhaseRef.current === "speaking";
+      if (voiceMode && isSpeaking && combined && !isLikelyAssistantEcho(combined)) {
+        if (!interruptionHandledRef.current) {
+          interruptionHandledRef.current = true;
+          stopSpeaking();
+          setVoicePhase("listening");
+        }
+      }
     };
 
     recognition.onerror = () => {
@@ -292,6 +335,10 @@ export default function ChatPage() {
       recognition.abort();
       recognitionActiveRef.current = false;
       window.speechSynthesis?.cancel();
+      if (speakingListenDelayTimerRef.current) {
+        window.clearTimeout(speakingListenDelayTimerRef.current);
+        speakingListenDelayTimerRef.current = null;
+      }
       if (speechEnergyDecayTimerRef.current) {
         window.clearTimeout(speechEnergyDecayTimerRef.current);
         speechEnergyDecayTimerRef.current = null;
@@ -341,7 +388,13 @@ export default function ChatPage() {
     pendingSpeechRef.current = null;
     speechQueueRef.current = [];
     speechInFlightRef.current = false;
+    interruptionHandledRef.current = false;
     lastBoundaryTimeRef.current = 0;
+    latestAssistantSpeechRef.current = "";
+    if (speakingListenDelayTimerRef.current) {
+      window.clearTimeout(speakingListenDelayTimerRef.current);
+      speakingListenDelayTimerRef.current = null;
+    }
     if (speechEnergyDecayTimerRef.current) {
       window.clearTimeout(speechEnergyDecayTimerRef.current);
       speechEnergyDecayTimerRef.current = null;
@@ -364,6 +417,7 @@ export default function ChatPage() {
 
     const nextChunk = speechQueueRef.current.shift();
     if (!nextChunk) {
+      interruptionHandledRef.current = false;
       if (voiceMode && shouldResumeListeningRef.current && !loading) startListening();
       else if (!loading) setVoicePhase("idle");
       return;
@@ -384,6 +438,16 @@ export default function ChatPage() {
       setVoicePhase("speaking");
       setVoiceEnergy(0.5);
       lastBoundaryTimeRef.current = performance.now();
+
+      if (voiceMode && shouldResumeListeningRef.current && !loading) {
+        if (speakingListenDelayTimerRef.current) {
+          window.clearTimeout(speakingListenDelayTimerRef.current);
+        }
+        speakingListenDelayTimerRef.current = window.setTimeout(() => {
+          speakingListenDelayTimerRef.current = null;
+          startListening();
+        }, 450);
+      }
     };
     utterance.onboundary = (event) => {
       const now = performance.now();
@@ -403,6 +467,11 @@ export default function ChatPage() {
     };
     utterance.onend = () => {
       speechInFlightRef.current = false;
+      interruptionHandledRef.current = false;
+      if (speakingListenDelayTimerRef.current) {
+        window.clearTimeout(speakingListenDelayTimerRef.current);
+        speakingListenDelayTimerRef.current = null;
+      }
       if (speechEnergyDecayTimerRef.current) {
         window.clearTimeout(speechEnergyDecayTimerRef.current);
         speechEnergyDecayTimerRef.current = null;
@@ -412,6 +481,11 @@ export default function ChatPage() {
     };
     utterance.onerror = () => {
       speechInFlightRef.current = false;
+      interruptionHandledRef.current = false;
+      if (speakingListenDelayTimerRef.current) {
+        window.clearTimeout(speakingListenDelayTimerRef.current);
+        speakingListenDelayTimerRef.current = null;
+      }
       if (speechEnergyDecayTimerRef.current) {
         window.clearTimeout(speechEnergyDecayTimerRef.current);
         speechEnergyDecayTimerRef.current = null;
@@ -444,8 +518,10 @@ export default function ChatPage() {
       return;
     }
 
+    latestAssistantSpeechRef.current = cleanSpeechText(text);
     speechQueueRef.current = chunkTextForSpeech(text);
     speechInFlightRef.current = false;
+    interruptionHandledRef.current = false;
     pendingSpeechRef.current = null;
     window.speechSynthesis.cancel();
     window.speechSynthesis.resume();
