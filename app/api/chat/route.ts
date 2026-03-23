@@ -1,123 +1,245 @@
 import { NextRequest, NextResponse } from "next/server";
 import { nvidia, NVIDIA_MODELS } from "@/lib/openrouter";
+import { createAdminClient } from "@/lib/supabase/admin";
 
-const MAX_MESSAGES = 50;      // prevent token abuse
-const MAX_CONTENT_LENGTH = 4000; // chars per message
+const MAX_MESSAGES = 50;
+const MAX_CONTENT_LENGTH = 4000;
 const ALLOWED_ROLES = new Set(["user", "assistant"]);
 
-const SYSTEM_PROMPT = `You are Luna — SocialMoon's witty, sharp, and genuinely helpful AI. You're not a boring chatbot; you're like that one brilliant friend who happens to know everything about marketing, branding, and growing a business. You're warm, a little playful, and always real — no corporate speak, no fluff, no filler.
+const SYSTEM_PROMPT = `You are Luna, SocialMoon's friendly AI growth consultant.
 
-SocialMoon is a full-service digital marketing agency that turns ambitious brands into market leaders. Here's what makes us different: we treat every client's budget like it's our own money and we only recommend what actually moves the needle.
+Goals:
+- Help visitors with marketing strategy, services, pricing ranges, and timelines.
+- Be concise, clear, and practical.
+- Sound natural when your answer will be spoken aloud.
+- Sound like a warm, thoughtful human teammate, not a bot or machine.
+- Keep your tone friendly, calm, and conversational.
+- In English, be slightly more talkative and emotionally natural, like a helpful person on a live call.
+- Use small conversational phrases naturally, like "sure", "absolutely", "got it", or "let's figure this out", when they fit.
+- Do not sound stiff, overly formal, robotic, or scripted.
+- Use only English or Hindi.
+- If the user writes in Hindi, reply in natural, easy Hindi that feels supportive and human, similar to a friendly real conversation.
+- If the user writes in English, reply in warm, simple English.
+- Negotiate respectfully when users ask about discounts or flexibility.
+- When the user seems interested in moving forward, ask for contact details (email + phone).
+- If user reports a problem, ask for contact details so the team can follow up.
+- Reply in Hindi if the user's latest message is in Hindi, otherwise reply in English.
+- Never use markdown headings.
+`;
 
----
+type SanitizedMessage = { role: "user" | "assistant"; content: string };
+type ConversationInsights = {
+  topic: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  negotiationDetected: boolean;
+};
 
-## 🚀 Our Services
+const TOPIC_MAP: Record<string, string[]> = {
+  "Paid Ads": ["ads", "google ads", "meta ads", "roas", "ppc", "\u0935\u093f\u091c\u094d\u091e\u093e\u092a\u0928", "\u0910\u0921\u094d\u0938", "\u0917\u0942\u0917\u0932 \u0910\u0921\u094d\u0938"],
+  "SEO": ["seo", "keyword", "organic", "backlink", "\u0915\u0940\u0935\u0930\u094d\u0921", "\u0930\u0948\u0902\u0915", "\u0911\u0930\u094d\u0917\u0947\u0928\u093f\u0915"],
+  "Social Media": ["social", "instagram", "linkedin", "tiktok", "youtube", "\u0938\u094b\u0936\u0932 \u092e\u0940\u0921\u093f\u092f\u093e", "\u0907\u0902\u0938\u094d\u091f\u093e\u0917\u094d\u0930\u093e\u092e"],
+  "Branding": ["brand", "positioning", "identity", "messaging", "\u092c\u094d\u0930\u093e\u0902\u0921", "\u092c\u094d\u0930\u093e\u0902\u0921\u093f\u0902\u0917"],
+  "Email Marketing": ["email", "automation", "drip", "klaviyo", "\u0908\u092e\u0947\u0932", "\u0911\u091f\u094b\u092e\u0947\u0936\u0928"],
+  "Web/CRO": ["website", "landing page", "cro", "conversion", "\u0935\u0947\u092c\u0938\u093e\u0907\u091f", "\u0932\u0948\u0902\u0921\u093f\u0902\u0917 \u092a\u0947\u091c"],
+  "Pricing": ["price", "pricing", "cost", "budget", "quote", "\u0915\u0940\u092e\u0924", "\u092a\u094d\u0930\u093e\u0907\u0938", "\u092c\u091c\u091f", "\u0915\u094b\u091f"],
+  "Support Issue": ["problem", "issue", "not working", "bug", "error", "complaint", "\u0938\u092e\u0938\u094d\u092f\u093e", "\u0926\u093f\u0915\u094d\u0915\u0924", "\u0915\u093e\u092e \u0928\u0939\u0940\u0902", "\u090f\u0930\u0930"],
+};
 
-### Paid Advertising
-We run performance-first campaigns on Google, Meta (Facebook/Instagram), LinkedIn, TikTok, and YouTube. We don't just spend budgets — we engineer funnels. Average client sees 3–6x ROAS within 90 days of working with us.
+function detectTopic(text: string): string {
+  const lower = text.toLowerCase();
+  for (const [topic, keywords] of Object.entries(TOPIC_MAP)) {
+    if (keywords.some((kw) => lower.includes(kw.toLowerCase()))) return topic;
+  }
+  return "General Inquiry";
+}
 
-### SEO & Content Marketing
-Full-stack SEO — technical audits, content strategy, link building, and keyword domination. We've helped clients go from page 5 to position 1 in competitive niches within 6 months. Content that ranks AND converts.
+function extractEmail(text: string): string | null {
+  const match = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  return match?.[0]?.trim().replace(/[.,;:!?]+$/, "").toLowerCase() ?? null;
+}
 
-### Social Media Management
-We don't just post — we build communities. Strategy, content creation, scheduling, and community management across LinkedIn, Instagram, X (Twitter), and TikTok. Brands that work with us typically see 40–200% engagement growth.
+function extractPhone(text: string): string | null {
+  const indianMatch = text.match(/(?:\+?91[\s-]?)?[6-9]\d{4}[\s-]?\d{5}/);
+  if (indianMatch?.[0]) {
+    const digits = indianMatch[0].replace(/[^\d+]/g, "");
+    return digits.startsWith("91") && digits.length === 12 ? `+${digits}` : digits;
+  }
 
-### Brand Strategy & Identity
-Positioning, messaging, visual identity, tone of voice. We help you figure out not just what you sell — but WHY people should care. Includes logo, brand guidelines, and go-to-market messaging.
+  const genericMatch = text.match(/(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}/);
+  return genericMatch?.[0]?.replace(/[^\d+]/g, "") ?? null;
+}
 
-### Marketing Analytics & Reporting
-If you can't measure it, you can't grow it. We set up full attribution using GA4, Mixpanel, and Looker Studio so you always know what's working, what's not, and where to double down.
+function extractName(text: string): string | null {
+  const match = text.match(/(?:my name is|i am|i'm|mera naam hai|mera naam|main)\s+([a-z\u0900-\u097f][a-z\u0900-\u097f\s'-]{1,40})/i);
+  return match?.[1]?.trim() ?? null;
+}
 
-### Email & Marketing Automation
-Lifecycle campaigns, drip sequences, abandoned cart flows, re-engagement campaigns. CRM setup and integration (HubSpot, ActiveCampaign, Klaviyo). Clients typically see 20–35% of revenue from email alone after 3 months.
+function detectNegotiation(text: string): boolean {
+  return /(discount|negotiate|best price|lower (the )?price|deal|budget is tight|can you reduce|\u0915\u092e \u0915\u0930|\u091b\u0942\u091f|\u0921\u093f\u0938\u094d\u0915\u093e\u0909\u0902\u091f|\u0938\u0938\u094d\u0924\u093e|\u092c\u0947\u0938\u094d\u091f \u092a\u094d\u0930\u093e\u0907\u0938)/i.test(text);
+}
 
-### Website & Landing Page Optimization
-CRO (conversion rate optimization), A/B testing, UX improvements. We turn traffic into customers. Average improvement: 25–60% increase in conversion rate.
+function getUserMessages(messages: SanitizedMessage[]) {
+  return messages.filter((message) => message.role === "user");
+}
 
----
+function pickLatestMatch(messages: SanitizedMessage[], extractor: (text: string) => string | null) {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const match = extractor(messages[i].content);
+    if (match) return match;
+  }
+  return null;
+}
 
-## 💼 Past Work & Results (share these when clients ask)
+function parseJsonObject(text: string): Record<string, unknown> | null {
+  const trimmed = text.trim();
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) return null;
 
-- **E-commerce brand (fashion)** — Scaled Meta ads from $5k/mo to $80k/mo while maintaining 4.2x ROAS. Grew revenue from $200k to $1.4M in 8 months.
-- **B2B SaaS (HR tech)** — LinkedIn + content strategy drove 3x pipeline growth in 5 months. Cost per qualified lead dropped from $420 to $118.
-- **D2C supplement brand** — Built full email automation (welcome series, post-purchase, winback). Email went from 8% to 31% of total revenue in 90 days.
-- **Local service business (dental group)** — Google Ads + local SEO. Went from 40 to 180 new patient inquiries per month in 4 months.
-- **SaaS startup (Series A)** — Full brand refresh + performance marketing. Helped them hit 10k MRR within 6 months of launch.
-- **Real estate agency** — Content + social strategy. Instagram grew from 800 to 22k followers in 6 months. Inbound leads up 4x.
+  try {
+    return JSON.parse(trimmed.slice(start, end + 1)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
 
----
+async function extractInsightsWithAI(messages: SanitizedMessage[]): Promise<Partial<ConversationInsights>> {
+  const conversationText = messages
+    .slice(-12)
+    .map((message) => `${message.role.toUpperCase()}: ${message.content}`)
+    .join("\n");
 
-## 💰 Pricing (be transparent, but guide toward a discovery call for exact quotes)
+  const extractionPrompt = `Extract lead details from this conversation.
 
-- **Starter retainer** — $2,500–$5,000/month (1–2 services, smaller brands)
-- **Growth retainer** — $5,000–$15,000/month (multi-channel, growing companies)
-- **Scale retainer** — $15,000–$50,000+/month (full-service, funded startups or enterprise)
-- **One-time projects** — Website audit ($800), Brand strategy ($3,000–$8,000), Campaign setup ($1,500–$5,000)
-- **Ad spend management fee** — typically 15–20% of ad spend (minimum $1,000/mo management fee)
+Return valid JSON only with this exact shape:
+{
+  "topic": string | null,
+  "name": string | null,
+  "email": string | null,
+  "phone": string | null,
+  "negotiationDetected": boolean
+}
 
-### On negotiation:
-Be honest — pricing IS somewhat flexible depending on scope, contract length, and the brand's growth stage. A 6-month commitment often unlocks 10–15% better rates. Early-stage startups with high potential sometimes get special deal structures (reduced retainer + performance bonus). Always encourage them to get on a discovery call to explore options — never quote final prices in chat.
+Rules:
+- Use only details explicitly stated in the conversation.
+- If a value is missing, use null.
+- Keep the phone in a normalized compact form.
+- Detect whether the user is negotiating on pricing.
+- Topic should be a short label like Pricing, Support Issue, SEO, Paid Ads, Social Media, Branding, Email Marketing, Web/CRO, or General Inquiry.
 
----
+Conversation:
+${conversationText}`;
 
-## 🎯 Ideal Clients
-- B2B SaaS, B2B services, D2C e-commerce, professional services, funded startups
-- Monthly budget $2,500–$100k+
-- Decision-makers: Founder, CMO, VP Marketing, Head of Growth
-- Companies serious about growth, not just "trying marketing"
+  try {
+    const completion = await nvidia.chat.completions.create({
+      model: NVIDIA_MODELS.reasoning,
+      max_tokens: 200,
+      temperature: 0,
+      stream: false,
+      messages: [{ role: "system", content: extractionPrompt }],
+    });
 
----
+    const raw = completion.choices[0]?.message?.content ?? "";
+    const parsed = parseJsonObject(raw);
+    if (!parsed) return {};
 
-## ❓ Common Client Questions — How to Answer
+    const topic = typeof parsed.topic === "string" && parsed.topic.trim() ? parsed.topic.trim() : undefined;
+    const name = typeof parsed.name === "string" && parsed.name.trim() ? parsed.name.trim() : undefined;
+    const email = typeof parsed.email === "string" && parsed.email.trim() ? extractEmail(parsed.email) ?? undefined : undefined;
+    const phone = typeof parsed.phone === "string" && parsed.phone.trim() ? extractPhone(parsed.phone) ?? undefined : undefined;
 
-**"What projects have you done?"**
-Share 2–3 relevant case studies from the list above, matched to the client's industry or goal. Be specific with numbers.
+    return {
+      topic,
+      name,
+      email,
+      phone,
+      negotiationDetected: Boolean(parsed.negotiationDetected),
+    };
+  } catch (error) {
+    console.error("[/api/chat] AI extraction failed", error);
+    return {};
+  }
+}
 
-**"What ROI can I expect?"**
-Be honest — ROI depends on the channel, budget, industry, and how good the product/offer is. Give realistic ranges: paid ads typically 2–5x ROAS in 60–90 days once optimized; SEO compounds over 6–12 months; email is often the highest ROI channel long-term. Always say "we'd need to understand your specific situation to give you a real number."
+async function persistConversation(sessionId: string, messages: SanitizedMessage[]) {
+  const admin = createAdminClient();
+  if (!admin) return;
 
-**"Is pricing negotiable?"**
-Yes, somewhat. Depends on scope and commitment. Longer contracts, bundled services, and growth-stage startups all have room to discuss. Best answered on a discovery call.
+  const userMessages = getUserMessages(messages);
+  const lastUser = [...userMessages].reverse().find((msg) => msg.role === "user");
+  if (!lastUser) return;
 
-**"How long until we see results?"**
-Paid ads: 30–60 days to see meaningful data, 60–90 to be optimized. SEO: 3–6 months minimum. Social: 60–90 days for meaningful growth. Email: results start immediately with good automations.
+  const combinedUserText = userMessages.map((message) => message.content).join("\n");
+  const regexInsights: ConversationInsights = {
+    topic: detectTopic(combinedUserText),
+    email: pickLatestMatch(userMessages, extractEmail),
+    phone: pickLatestMatch(userMessages, extractPhone),
+    name: pickLatestMatch(userMessages, extractName),
+    negotiationDetected: userMessages.some((message) => detectNegotiation(message.content)),
+  };
+  const aiInsights = await extractInsightsWithAI(messages);
 
-**"Why SocialMoon over other agencies?"**
-We're not order-takers. We push back when we disagree with strategy. We're obsessed with data. We treat your budget like it's ours. We have a track record of results across different industries. And honestly — we're just better communicators than most agencies.
+  const { data: existingSession, error: existingError } = await admin
+    .from("conversation_sessions")
+    .select("visitor_name, visitor_email, visitor_phone, negotiation_detected")
+    .eq("session_id", sessionId)
+    .maybeSingle();
 
-**"Do you work with small businesses?"**
-Yes, but ideally with businesses that are already making money and want to scale, not businesses still trying to find product-market fit. Minimum engagement starts at $2,500/month.
+  if (existingError) {
+    console.error("[/api/chat] Failed to fetch existing session", existingError);
+  }
 
----
+  const { error: chatMessageError } = await admin.from("chat_messages").insert({
+    session_id: sessionId,
+    role: "user",
+    content: lastUser.content.slice(0, MAX_CONTENT_LENGTH),
+  });
 
-## 🗣️ Your Personality & Conversation Style
+  if (chatMessageError) {
+    console.error("[/api/chat] Failed to persist user message", chatMessageError);
+  }
 
-- Warm, direct, and a little witty — like texting a brilliant marketing friend
-- Use casual language but stay professional — contractions are fine, slang is not
-- Use emojis sparingly but naturally when it fits the tone 🎯
-- Never use buzzword salad ("synergize", "leverage our core competencies", etc.)
-- Ask one good question at a time — don't interrogate
-- When someone asks about pricing, don't dodge it — give ranges and explain what drives cost
-- When someone seems ready to move forward, naturally suggest a discovery call
-- If someone is venting about a bad agency experience, empathize genuinely before pitching
-- Match the client's energy — if they're excited, be excited with them; if they're skeptical, address their doubts head-on
-- Be honest even if it's not what they want to hear — it builds trust
-- NEVER use markdown headers (##, ###, ####) in your responses — they render as raw symbols in this chat. Use plain text, line breaks, and natural sentence structure instead. Bold text using **word** is fine for emphasis.
+  const { error: sessionError } = await admin.from("conversation_sessions").upsert(
+    {
+      session_id: sessionId,
+      latest_topic: aiInsights.topic ?? regexInsights.topic,
+      latest_query: lastUser.content.slice(0, 1000),
+      visitor_name: aiInsights.name ?? regexInsights.name ?? existingSession?.visitor_name ?? null,
+      visitor_email: aiInsights.email ?? regexInsights.email ?? existingSession?.visitor_email ?? null,
+      visitor_phone: aiInsights.phone ?? regexInsights.phone ?? existingSession?.visitor_phone ?? null,
+      negotiation_detected:
+        Boolean(aiInsights.negotiationDetected) ||
+        regexInsights.negotiationDetected ||
+        Boolean(existingSession?.negotiation_detected),
+      last_user_message_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "session_id" }
+  );
 
----
+  if (sessionError) {
+    console.error("[/api/chat] Failed to persist session", sessionError);
+  }
+}
 
-## 📞 When to Suggest a Discovery Call
-- They've asked about pricing for their specific situation
-- They've described a clear problem you can solve
-- They seem genuinely interested in working together
-- They've asked about timelines or process
-- After a good back-and-forth where they seem engaged
+async function persistAssistantReply(sessionId: string, content: string) {
+  const admin = createAdminClient();
+  if (!admin || !content.trim()) return;
 
-Discovery call link: just say "I can set you up with a free 30-minute discovery call with our team — no pressure, just a real conversation about your goals." (They can share their email/phone to arrange it.)`;
+  const { error } = await admin.from("chat_messages").insert({
+    session_id: sessionId,
+    role: "assistant",
+    content: content.slice(0, MAX_CONTENT_LENGTH),
+  });
 
+  if (error) {
+    console.error("[/api/chat] Failed to persist assistant reply", error);
+  }
+}
 
 export async function POST(req: NextRequest) {
-  // Only accept JSON
   const contentType = req.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json")) {
     return NextResponse.json({ error: "Invalid content type" }, { status: 415 });
@@ -130,7 +252,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { messages } = body as Record<string, unknown>;
+  const { messages, sessionId, preferredLanguage } = body as Record<string, unknown>;
 
   if (!Array.isArray(messages) || messages.length === 0) {
     return NextResponse.json({ error: "Invalid messages" }, { status: 400 });
@@ -140,39 +262,53 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Too many messages" }, { status: 400 });
   }
 
-  // Validate and sanitize — only allow user/assistant roles, string content
-  // This prevents prompt injection via crafted system messages
-  const sanitized: { role: "user" | "assistant"; content: string }[] = [];
+  const sanitized: SanitizedMessage[] = [];
   for (const msg of messages) {
     if (
-      typeof msg !== "object" || msg === null ||
+      typeof msg !== "object" ||
+      msg === null ||
       !ALLOWED_ROLES.has((msg as Record<string, unknown>).role as string) ||
       typeof (msg as Record<string, unknown>).content !== "string"
     ) {
       return NextResponse.json({ error: "Invalid message format" }, { status: 400 });
     }
+
     sanitized.push({
       role: (msg as Record<string, unknown>).role as "user" | "assistant",
       content: ((msg as Record<string, unknown>).content as string).slice(0, MAX_CONTENT_LENGTH),
     });
   }
 
-  // Last message must be from the user
   if (sanitized[sanitized.length - 1].role !== "user") {
     return NextResponse.json({ error: "Last message must be from user" }, { status: 400 });
   }
+
+  const resolvedSessionId =
+    typeof sessionId === "string" && sessionId.trim().length > 0
+      ? sessionId.trim().slice(0, 128)
+      : crypto.randomUUID();
+
+  const languageHint =
+    typeof preferredLanguage === "string" && preferredLanguage.trim()
+      ? preferredLanguage.trim().slice(0, 32)
+      : "auto";
 
   try {
     if (!process.env.NVIDIA_API_KEY) {
       return NextResponse.json({ error: "NVIDIA_API_KEY is not configured." }, { status: 503 });
     }
 
+    await persistConversation(resolvedSessionId, sanitized);
+
     const stream = await nvidia.chat.completions.create({
       model: NVIDIA_MODELS.reasoning,
       max_tokens: 500,
       stream: true,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        {
+          role: "system",
+          content: `${SYSTEM_PROMPT}\nPreferred speaking language hint: ${languageHint}.`,
+        },
         ...sanitized,
       ],
     });
@@ -180,11 +316,19 @@ export async function POST(req: NextRequest) {
     const encoder = new TextEncoder();
     const readable = new ReadableStream({
       async start(controller) {
+        let assistantReply = "";
         try {
           for await (const chunk of stream) {
             const token = chunk.choices[0]?.delta?.content ?? "";
-            if (token) controller.enqueue(encoder.encode(token));
+            if (token) {
+              assistantReply += token;
+              controller.enqueue(encoder.encode(token));
+            }
           }
+          await persistAssistantReply(resolvedSessionId, assistantReply);
+        } catch (streamError) {
+          console.error("[/api/chat] Stream error:", streamError);
+          throw streamError;
         } finally {
           controller.close();
         }
@@ -192,16 +336,15 @@ export async function POST(req: NextRequest) {
     });
 
     return new Response(readable, {
-      headers: { "Content-Type": "text/plain; charset=utf-8", "X-Content-Type-Options": "nosniff" },
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "X-Content-Type-Options": "nosniff",
+        "X-Session-Id": resolvedSessionId,
+      },
     });
   } catch (err: unknown) {
-    let message = err instanceof Error ? err.message : String(err);
-    // OpenAI SDK wraps API errors — extract the full body if available
-    if (err && typeof err === "object" && "status" in err) {
-      const apiErr = err as { status?: number; message?: string; error?: unknown };
-      message = `HTTP ${apiErr.status}: ${JSON.stringify(apiErr.error ?? apiErr.message)}`;
-    }
+    const message = err instanceof Error ? err.message : String(err);
     console.error("[/api/chat] NVIDIA error:", message);
-    return NextResponse.json({ error: "AI service unavailable. Please try again.", detail: message }, { status: 503 });
+    return NextResponse.json({ error: "AI service unavailable. Please try again." }, { status: 503 });
   }
 }

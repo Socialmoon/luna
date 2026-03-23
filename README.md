@@ -23,11 +23,12 @@ Visitors open the chat, ask about SocialMoon's services (SEO, paid ads, social m
 
 ## Features
 
-- **Luna AI** — Conversational persona trained on SocialMoon's services, pricing, case studies, and objection-handling
-- **Auto Lead Capture** — Name, email, phone, and query extracted from chat and saved to Supabase automatically
+- **Voice Agent** — Users can speak to Luna using browser speech-to-text and optionally hear spoken replies
+- **Negotiation-Aware Responses** — Luna handles pricing discussions and identifies negotiation intent
+- **Auto Session Tracking** — Captures topic, latest query, negotiation flag, and contact details from each conversation
+- **Admin Dashboard** — `/leads` view shows tracked conversation sessions and captured contact info
 - **Light / Dark / System Theme** — Three-way toggle, respects OS preference by default
 - **Hardened Chat API** — Input validation, role injection prevention, message limits, safe error handling
-- **Model-Agnostic** — Powered by OpenRouter; swap models without changing code
 
 ---
 
@@ -165,3 +166,14 @@ See [.env.example](.env.example) for the full list. Required keys:
 <div align="center">
   <sub>Built for SocialMoon · Private &amp; Confidential</sub>
 </div>
+## Admin Dashboard Security
+
+Set these environment variables to protect the dashboard:
+
+```env
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=your-strong-password
+ADMIN_SESSION_SECRET=replace-with-a-long-random-secret
+```
+
+The `/leads` dashboard and `/api/leads` endpoints are protected by an admin login session.
