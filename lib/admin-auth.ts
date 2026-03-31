@@ -26,7 +26,7 @@ export async function createAdminSession() {
 
   cookieStore.set(ADMIN_SESSION_COOKIE, sessionValue, {
     httpOnly: true,
-    sameSite: "lax",
+    sameSite: "strict",
     secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: getSessionMaxAgeSeconds(),
@@ -37,7 +37,7 @@ export async function clearAdminSession() {
   const cookieStore = await cookies();
   cookieStore.set(ADMIN_SESSION_COOKIE, "", {
     httpOnly: true,
-    sameSite: "lax",
+    sameSite: "strict",
     secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: 0,

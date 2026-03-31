@@ -5,7 +5,15 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 const MAX_MESSAGES = 50;
 const MAX_CONTENT_LENGTH = 4000;
+const MAX_ASSISTANT_REPLY_LENGTH = 2400;
+const SUPABASE_PERSISTENCE_PAUSE_MS = 5 * 60 * 1000;
+const DB_RETRY_ATTEMPTS = 3;
+const DB_RETRY_BASE_DELAY_MS = 350;
+const STREAM_CHUNK_SIZE = 34;
 const ALLOWED_ROLES = new Set(["user", "assistant"]);
+
+let supabasePersistencePausedUntil = 0;
+let supabasePauseWasLogged = false;
 
 const SYSTEM_PROMPT = `You are Luna, SocialMoon's friendly AI growth consultant.
 
@@ -18,6 +26,7 @@ Goals:
 - Sound natural when your answer will be spoken aloud.
 - Sound like a warm, thoughtful human teammate, not a bot or machine.
 - Keep your tone friendly, calm, and conversational.
+- Sound like a real helpful teammate in chat, not a scripted bot.
 - In English, be slightly more talkative and emotionally natural, like a helpful person on a live call.
 - Use small conversational phrases naturally, like "sure", "absolutely", "got it", or "let's figure this out", when they fit.
 - Do not sound stiff, overly formal, robotic, or scripted.
@@ -30,6 +39,9 @@ Goals:
 - If user reports a problem, ask for contact details so the team can follow up.
 - Reply in Hindi if the user's latest message is in Hindi, otherwise reply in English.
 - Never use markdown headings.
+- Keep responses interactive: end with one natural next-step question when useful.
+- Avoid fake certainty. If details are missing, say so briefly and ask for just the missing input.
+- Keep advice accurate to provided context. Never invent numbers, case studies, or guarantees.
 - Only answer questions related to SocialMoon, its services, marketing strategy, lead generation, paid ads, SEO, websites, branding, social media, pricing, onboarding, campaign planning, or support issues.
 - If a request is unrelated to SocialMoon or digital marketing services, politely refuse and steer the user back to SocialMoon-related questions only.
 - Do not provide general knowledge, coding help, entertainment, politics, personal advice, schoolwork, or unrelated research.
@@ -249,6 +261,153 @@ function getUserMessages(messages: SanitizedMessage[]) {
   return messages.filter((message) => message.role === "user");
 }
 
+function isSupabasePersistencePaused() {
+  if (Date.now() < supabasePersistencePausedUntil) return true;
+
+  if (supabasePersistencePausedUntil !== 0) {
+    supabasePersistencePausedUntil = 0;
+    supabasePauseWasLogged = false;
+  }
+
+  return false;
+}
+
+function isSupabaseNetworkError(error: unknown) {
+  const text = JSON.stringify(error ?? "").toLowerCase();
+  return ["fetch failed", "enotfound", "getaddrinfo", "econnrefused", "etimedout"].some((signal) => text.includes(signal));
+}
+
+function isTransientSupabaseError(error: unknown) {
+  const text = JSON.stringify(error ?? "").toLowerCase();
+  return ["timeout", "temporarily", "rate limit", "429", "500", "502", "503", "504"].some((signal) => text.includes(signal));
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withDbRetry<T extends { error: unknown }>(
+  scope: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  let lastResult: T | null = null;
+
+  for (let attempt = 1; attempt <= DB_RETRY_ATTEMPTS; attempt += 1) {
+    const result = await operation();
+    lastResult = result;
+
+    if (!result.error) return result;
+    if (isSupabaseNetworkError(result.error)) {
+      handleSupabasePersistenceError(`${scope} (attempt ${attempt})`, result.error);
+      return result;
+    }
+
+    const canRetry = isTransientSupabaseError(result.error) && attempt < DB_RETRY_ATTEMPTS;
+    if (!canRetry) {
+      console.error(`[/api/chat] ${scope}`, result.error);
+      return result;
+    }
+
+    await wait(DB_RETRY_BASE_DELAY_MS * attempt);
+  }
+
+  return lastResult as T;
+}
+
+function chunkTextForStream(text: string) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return [];
+
+  const words = normalized.split(" ");
+  const chunks: string[] = [];
+  let current = "";
+
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length > STREAM_CHUNK_SIZE && current) {
+      chunks.push(`${current} `);
+      current = word;
+      continue;
+    }
+    current = candidate;
+  }
+
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+function handleSupabasePersistenceError(scope: string, error: unknown) {
+  if (isSupabaseNetworkError(error)) {
+    supabasePersistencePausedUntil = Date.now() + SUPABASE_PERSISTENCE_PAUSE_MS;
+    if (!supabasePauseWasLogged) {
+      supabasePauseWasLogged = true;
+      console.warn(
+        `[/api/chat] Supabase persistence paused for ${SUPABASE_PERSISTENCE_PAUSE_MS / 60000} minutes due to network error at ${scope}.`
+      );
+    }
+    return true;
+  }
+
+  console.error(`[/api/chat] ${scope}`, error);
+  return false;
+}
+
+function needsClarifyingQuestion(latestUserMessage: string) {
+  const lower = latestUserMessage.toLowerCase();
+  if (lower.length < 14) return true;
+
+  const explicitQuestionSignals = ["how", "what", "why", "which", "cost", "price", "package", "help", "strategy"];
+  const hasSignal = explicitQuestionSignals.some((signal) => lower.includes(signal));
+  const hasSpecificData = /(google ads|meta ads|seo|website|landing page|social media|branding|budget|timeline|industry)/i.test(lower);
+
+  return !hasSignal || !hasSpecificData;
+}
+
+function shouldAskForContact(messages: SanitizedMessage[]) {
+  const userMessages = getUserMessages(messages);
+  const combined = userMessages.map((m) => m.content).join("\n");
+  const latest = userMessages[userMessages.length - 1]?.content ?? "";
+
+  const hasEmail = Boolean(pickLatestMatch(userMessages, extractEmail));
+  const hasPhone = Boolean(pickLatestMatch(userMessages, extractPhone));
+  const hasContact = hasEmail && hasPhone;
+
+  const buyingIntent =
+    /(let'?s start|want to start|how do we begin|book|schedule|call me|contact me|proposal|quote|onboard|interested|move forward|pricing|price|cost)/i.test(
+      `${combined}\n${latest}`
+    );
+
+  const supportIntent = /(issue|problem|not working|bug|error|complaint|help urgently)/i.test(latest);
+  return (buyingIntent || supportIntent) && !hasContact;
+}
+
+function buildConversationStateInstruction(messages: SanitizedMessage[]) {
+  const userMessages = getUserMessages(messages);
+  const latestUser = userMessages[userMessages.length - 1]?.content ?? "";
+  const topic = detectTopic(userMessages.map((m) => m.content).join("\n"));
+  const negotiationDetected = userMessages.some((message) => detectNegotiation(message.content));
+  const clarifierNeeded = needsClarifyingQuestion(latestUser);
+  const askForContact = shouldAskForContact(messages);
+
+  const instructions = [
+    "Conversation state and behavior:",
+    `- Current likely topic: ${topic}.`,
+    clarifierNeeded
+      ? "- User request may be broad. Give a direct compact answer, then ask exactly one short clarifying question."
+      : "- User request is specific enough. Give direct actionable guidance first, then optional next step.",
+    negotiationDetected
+      ? "- User appears price-sensitive. Offer respectful flexibility without making fake promises."
+      : "- Keep recommendations practical and outcome-focused.",
+    askForContact
+      ? "- Ask politely for both email and phone at the end so the team can follow up."
+      : "- Ask for contact details only if user is ready to move forward or requests follow-up.",
+    "- If exact pricing is not confirmed in chat context, provide a transparent range and mention it depends on scope.",
+    "- Do not invent case studies, metrics, guarantees, or internal policies.",
+  ];
+
+  return instructions.join("\n");
+}
+
 function pickLatestMatch(messages: SanitizedMessage[], extractor: (text: string) => string | null) {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const match = extractor(messages[i].content);
@@ -268,6 +427,70 @@ function parseJsonObject(text: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+function normalizeAssistantReply(reply: string) {
+  return reply
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+    .slice(0, MAX_ASSISTANT_REPLY_LENGTH);
+}
+
+function isWeakAssistantReply(reply: string) {
+  const cleaned = reply.trim();
+  if (!cleaned) return true;
+  if (cleaned.length < 24) return true;
+
+  const genericOnlyPatterns = [
+    /^i can help with that\.?$/i,
+    /^sure\.?$/i,
+    /^please share more details\.?$/i,
+    /^can you clarify\??$/i,
+  ];
+
+  return genericOnlyPatterns.some((pattern) => pattern.test(cleaned));
+}
+
+async function generateAssistantReply(
+  messages: SanitizedMessage[],
+  languageHint: string,
+  languageStyleInstruction: string,
+  stateInstruction: string,
+  extraInstruction?: string
+) {
+  const completion = await nvidia.chat.completions.create({
+    model: NVIDIA_MODELS.reasoning,
+    max_tokens: 320,
+    temperature: 0.35,
+    top_p: 0.9,
+    stream: false,
+    messages: [
+      {
+        role: "system",
+        content: [
+          SYSTEM_PROMPT,
+          `Preferred speaking language hint: ${languageHint}.`,
+          languageStyleInstruction,
+          stateInstruction,
+          extraInstruction ?? "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      },
+      ...messages,
+    ],
+  });
+
+  return normalizeAssistantReply(completion.choices[0]?.message?.content ?? "");
+}
+
+function buildFallbackResponse(latestUserMessage: string) {
+  if (isHindiText(latestUserMessage)) {
+    return "Main aapki SocialMoon marketing query mein madad karne ke liye yahin hoon. Ek short clear answer dene ke liye please apna goal, current channel (SEO/Ads/Social), aur approx budget share kar dijiye.";
+  }
+
+  return "I am here to help with your SocialMoon marketing query. To give you a precise next-step plan, please share your goal, current channel (SEO/Ads/Social), and approximate budget.";
 }
 
 async function extractInsightsWithAI(messages: SanitizedMessage[]): Promise<Partial<ConversationInsights>> {
@@ -330,6 +553,8 @@ ${conversationText}`;
 }
 
 async function persistConversation(sessionId: string, messages: SanitizedMessage[]) {
+  if (isSupabasePersistencePaused()) return;
+
   const admin = createAdminClient();
   if (!admin) return;
 
@@ -338,6 +563,7 @@ async function persistConversation(sessionId: string, messages: SanitizedMessage
   if (!lastUser) return;
 
   const combinedUserText = userMessages.map((message) => message.content).join("\n");
+  const aiInsights = await extractInsightsWithAI(messages);
   const regexInsights: ConversationInsights = {
     topic: detectTopic(combinedUserText),
     email: pickLatestMatch(userMessages, extractEmail),
@@ -346,59 +572,76 @@ async function persistConversation(sessionId: string, messages: SanitizedMessage
     negotiationDetected: userMessages.some((message) => detectNegotiation(message.content)),
   };
 
-  const { data: existingSession, error: existingError } = await admin
-    .from("conversation_sessions")
-    .select("visitor_name, visitor_email, visitor_phone, negotiation_detected")
-    .eq("session_id", sessionId)
-    .maybeSingle();
+  const { data: existingSession, error: existingError } = await withDbRetry(
+    "Failed to fetch existing session",
+    async () =>
+      await admin
+        .from("conversation_sessions")
+        .select("visitor_name, visitor_email, visitor_phone, negotiation_detected")
+        .eq("session_id", sessionId)
+        .maybeSingle()
+  );
 
-  if (existingError) {
-    console.error("[/api/chat] Failed to fetch existing session", existingError);
-  }
+  if (existingError && isSupabaseNetworkError(existingError)) return;
 
-  const { error: chatMessageError } = await admin.from("chat_messages").insert({
-    session_id: sessionId,
-    role: "user",
-    content: lastUser.content.slice(0, MAX_CONTENT_LENGTH),
-  });
-
-  if (chatMessageError) {
-    console.error("[/api/chat] Failed to persist user message", chatMessageError);
-  }
-
-  const { error: sessionError } = await admin.from("conversation_sessions").upsert(
-    {
+  const { error: chatMessageError } = await withDbRetry("Failed to persist user message", async () =>
+    await admin.from("chat_messages").insert({
       session_id: sessionId,
-      latest_topic: regexInsights.topic,
-      latest_query: lastUser.content.slice(0, 1000),
-      visitor_name: regexInsights.name ?? existingSession?.visitor_name ?? null,
-      visitor_email: regexInsights.email ?? normalizeEmail(existingSession?.visitor_email) ?? null,
-      visitor_phone: regexInsights.phone ?? normalizePhone(existingSession?.visitor_phone) ?? null,
-      negotiation_detected:
-        regexInsights.negotiationDetected || Boolean(existingSession?.negotiation_detected),
-      last_user_message_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "session_id" }
+      role: "user",
+      content: lastUser.content.slice(0, MAX_CONTENT_LENGTH),
+    })
+  );
+
+  if (chatMessageError && isSupabaseNetworkError(chatMessageError)) return;
+
+  const mergedTopic = aiInsights.topic ?? regexInsights.topic;
+  const mergedName = aiInsights.name ?? regexInsights.name;
+  const mergedEmail = aiInsights.email ?? regexInsights.email;
+  const mergedPhone = aiInsights.phone ?? regexInsights.phone;
+  const mergedNegotiation = Boolean(aiInsights.negotiationDetected) || regexInsights.negotiationDetected;
+
+  const { error: sessionError } = await withDbRetry("Failed to persist session", async () =>
+    await admin.from("conversation_sessions").upsert(
+      {
+        session_id: sessionId,
+        latest_topic: mergedTopic,
+        latest_query: lastUser.content.slice(0, 1000),
+        visitor_name: mergedName ?? existingSession?.visitor_name ?? null,
+        visitor_email: mergedEmail ?? normalizeEmail(existingSession?.visitor_email) ?? null,
+        visitor_phone: mergedPhone ?? normalizePhone(existingSession?.visitor_phone) ?? null,
+        negotiation_detected: mergedNegotiation || Boolean(existingSession?.negotiation_detected),
+        last_user_message_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "session_id" }
+    )
   );
 
   if (sessionError) {
-    console.error("[/api/chat] Failed to persist session", sessionError);
+    if (!isSupabaseNetworkError(sessionError)) {
+      console.error("[/api/chat] Failed to persist session", sessionError);
+    }
   }
 }
 
 async function persistAssistantReply(sessionId: string, content: string) {
+  if (isSupabasePersistencePaused()) return;
+
   const admin = createAdminClient();
   if (!admin || !content.trim()) return;
 
-  const { error } = await admin.from("chat_messages").insert({
-    session_id: sessionId,
-    role: "assistant",
-    content: content.slice(0, MAX_CONTENT_LENGTH),
-  });
+  const { error } = await withDbRetry("Failed to persist assistant reply", async () =>
+    await admin.from("chat_messages").insert({
+      session_id: sessionId,
+      role: "assistant",
+      content: content.slice(0, MAX_CONTENT_LENGTH),
+    })
+  );
 
   if (error) {
-    console.error("[/api/chat] Failed to persist assistant reply", error);
+    if (!isSupabaseNetworkError(error)) {
+      console.error("[/api/chat] Failed to persist assistant reply", error);
+    }
   }
 }
 
@@ -468,6 +711,7 @@ export async function POST(req: NextRequest) {
       : "auto";
 
   const languageStyleInstruction = buildLanguageStyleInstruction(sanitized, languageHint);
+  const stateInstruction = buildConversationStateInstruction(sanitized);
 
   try {
     if (!process.env.NVIDIA_API_KEY) {
@@ -478,43 +722,48 @@ export async function POST(req: NextRequest) {
       console.error("[/api/chat] Failed to persist conversation", error);
     });
 
-    const stream = await nvidia.chat.completions.create({
-      model: NVIDIA_MODELS.reasoning,
-      max_tokens: 260,
-      stream: true,
-      messages: [
-        {
-          role: "system",
-          content: `${SYSTEM_PROMPT}\nPreferred speaking language hint: ${languageHint}.\n${languageStyleInstruction}`,
-        },
-        ...sanitized,
-      ],
-    });
+    let assistantReply = await generateAssistantReply(
+      sanitized,
+      languageHint,
+      languageStyleInstruction,
+      stateInstruction
+    );
+
+    if (isWeakAssistantReply(assistantReply)) {
+      assistantReply = await generateAssistantReply(
+        sanitized,
+        languageHint,
+        languageStyleInstruction,
+        stateInstruction,
+        "Recovery mode: Provide one direct useful answer first, with concrete and realistic next steps. Keep it concise and human."
+      );
+    }
+
+    if (!assistantReply) {
+      assistantReply = buildFallbackResponse(latestUserMessage);
+    }
 
     const encoder = new TextEncoder();
-    const readable = new ReadableStream({
+    const chunks = chunkTextForStream(assistantReply);
+    const responseStream = new ReadableStream({
       async start(controller) {
-        let assistantReply = "";
         try {
-          for await (const chunk of stream) {
-            const token = chunk.choices[0]?.delta?.content ?? "";
-            if (token) {
-              assistantReply += token;
-              controller.enqueue(encoder.encode(token));
-            }
+          for (const chunk of chunks) {
+            controller.enqueue(encoder.encode(chunk));
+            await wait(12);
           }
+
           await persistConversationTask;
           await persistAssistantReply(resolvedSessionId, assistantReply);
         } catch (streamError) {
-          console.error("[/api/chat] Stream error:", streamError);
-          throw streamError;
+          console.error("[/api/chat] Response stream error", streamError);
         } finally {
           controller.close();
         }
       },
     });
 
-    return new Response(readable, {
+    return new Response(responseStream, {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
         "X-Content-Type-Options": "nosniff",

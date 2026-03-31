@@ -154,10 +154,8 @@ input::placeholder {
 .voice-stage-backdrop {
   position: absolute;
   inset: 0;
-  background:
-    radial-gradient(circle at 50% 65%, color-mix(in srgb, var(--bg-subtle) 70%, transparent), transparent 55%),
-    color-mix(in srgb, var(--panel) 78%, transparent);
-  backdrop-filter: blur(7px);
+  background: transparent;
+  backdrop-filter: none;
   animation: voiceBackdropIn 0.35s ease;
 }
 

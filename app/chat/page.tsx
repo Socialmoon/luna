@@ -120,6 +120,16 @@ function cleanSpeechText(text: string) {
   return text.replace(/\*\*(.*?)\*\*/g, "$1").replace(/\*(.*?)\*/g, "$1").replace(/\s+/g, " ").trim();
 }
 
+function getHumanizedSpeechText(text: string) {
+  return cleanSpeechText(text)
+    .replace(/\bROI\b/g, "R O I")
+    .replace(/\bSEO\b/g, "S E O")
+    .replace(/\bCRO\b/g, "C R O")
+    .replace(/\bPPC\b/g, "P P C")
+    .replace(/\bvs\.?\b/gi, "versus")
+    .replace(/\s*[-–—]\s*/g, ", ");
+}
+
 function chunkTextForSpeech(text: string) {
   const cleaned = cleanSpeechText(text);
   if (!cleaned) return [];
@@ -155,12 +165,14 @@ function pickBestVoice(voices: SpeechSynthesisVoice[], language: string) {
       let score = 0;
 
       if (voice.lang.toLowerCase() === normalizedLanguage) score += 6;
-      if (voice.localService) score += 2;
+      if (voice.localService) score += 1;
       if (voice.default) score += 1;
       if (name.includes("google")) score += 4;
       if (name.includes("microsoft")) score += 4;
       if (name.includes("natural")) score += 4;
       if (name.includes("neural")) score += 4;
+      if (name.includes("online")) score += 3;
+      if (name.includes("desktop")) score -= 2;
       if (name.includes("aria")) score += 5;
       if (name.includes("jenny")) score += 5;
       if (name.includes("samantha")) score += 5;
@@ -179,6 +191,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [streamingAssistant, setStreamingAssistant] = useState(false);
   const [sessionId, setSessionId] = useState("");
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
@@ -208,6 +221,32 @@ export default function ChatPage() {
   const latestAssistantSpeechRef = useRef("");
   const speakingListenDelayTimerRef = useRef<number | null>(null);
   const interruptionHandledRef = useRef(false);
+  const requestAbortRef = useRef<AbortController | null>(null);
+  const streamingSpeechBufferRef = useRef("");
+  const streamSpeechStoppedRef = useRef(false);
+  const responseSpeechLanguageRef = useRef("en-US");
+  const responseVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+
+  function getSmartFollowUps() {
+    const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant")?.content.toLowerCase() ?? "";
+    const isHindi = activeLanguage === "hi-IN";
+
+    if (/price|pricing|budget|quote|cost/.test(latestAssistant)) {
+      return isHindi
+        ? ["Mere budget ke hisaab se best plan batao", "Kitne time mein result aayega?", "Kya flexible package possible hai?"]
+        : ["Suggest the best plan for my budget", "How soon can I expect results?", "Is there a flexible package option?"];
+    }
+
+    if (/seo|ads|campaign|lead|social/.test(latestAssistant)) {
+      return isHindi
+        ? ["Mere business ke liye first step kya hoga?", "Expected monthly budget kitna hona chahiye?", "Team se call schedule karna hai"]
+        : ["What should be my first step?", "What monthly budget do you recommend?", "I want to schedule a call with your team"];
+    }
+
+    return isHindi
+      ? ["Mere business ke liye custom strategy do", "Pricing range share karo", "Mujhe team callback chahiye"]
+      : ["Give me a custom strategy for my business", "Share your pricing range", "I want a team callback"];
+  }
 
   function createFreshSession() {
     const freshSessionId = crypto.randomUUID();
@@ -265,6 +304,58 @@ export default function ChatPage() {
     return spoken.includes(heard);
   }
 
+  function extractSpeakableStreamingSegments(forceFlush = false) {
+    let buffer = streamingSpeechBufferRef.current.replace(/\s+/g, " ").trimStart();
+    if (!buffer) return [];
+
+    const segments: string[] = [];
+    const boundaryPattern = /[.!?।]+\s+/;
+
+    while (true) {
+      const match = buffer.match(boundaryPattern);
+      if (!match || match.index === undefined) break;
+
+      const boundaryEnd = match.index + match[0].length;
+      const segment = buffer.slice(0, boundaryEnd).trim();
+      if (segment.length >= 8) segments.push(segment);
+      buffer = buffer.slice(boundaryEnd).trimStart();
+    }
+
+    if (!forceFlush && segments.length === 0 && buffer.length >= 140) {
+      const softCut = buffer.lastIndexOf(" ", 120);
+      const cutAt = softCut > 46 ? softCut : 120;
+      segments.push(buffer.slice(0, cutAt).trim());
+      buffer = buffer.slice(cutAt).trimStart();
+    }
+
+    if (forceFlush && buffer.length > 0) {
+      segments.push(buffer.trim());
+      buffer = "";
+    }
+
+    streamingSpeechBufferRef.current = buffer;
+    return segments;
+  }
+
+  function queueStreamingSpeech(chunk: string, forceFlush = false) {
+    if (!voiceMode || streamSpeechStoppedRef.current) return;
+
+    if (chunk) {
+      streamingSpeechBufferRef.current = `${streamingSpeechBufferRef.current}${chunk}`;
+    }
+
+    const segments = extractSpeakableStreamingSegments(forceFlush);
+    if (!segments.length) return;
+
+    speechQueueRef.current.push(...segments);
+    if (speechReady) {
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.resume();
+      }
+      flushSpeechQueue();
+    }
+  }
+
   useEffect(() => {
     const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
     const canSpeak = typeof window !== "undefined" && "speechSynthesis" in window;
@@ -301,6 +392,8 @@ export default function ChatPage() {
       if (voiceMode && isSpeaking && combined && !isLikelyAssistantEcho(combined)) {
         if (!interruptionHandledRef.current) {
           interruptionHandledRef.current = true;
+          streamSpeechStoppedRef.current = true;
+          requestAbortRef.current?.abort();
           stopSpeaking();
           setVoicePhase("listening");
         }
@@ -423,16 +516,22 @@ export default function ChatPage() {
       return;
     }
 
-    const speechLanguage = detectMessageLanguage(nextChunk);
+    const speechText = getHumanizedSpeechText(nextChunk);
+    const speechLanguage = responseSpeechLanguageRef.current || detectMessageLanguage(speechText, activeLanguageRef.current);
     const voices = availableVoicesRef.current.length > 0 ? availableVoicesRef.current : window.speechSynthesis.getVoices();
-    const matchingVoice = pickBestVoice(voices, speechLanguage);
-    const utterance = new SpeechSynthesisUtterance(nextChunk);
+    if (!responseVoiceRef.current) {
+      responseVoiceRef.current = pickBestVoice(voices, speechLanguage);
+    }
+    const matchingVoice = responseVoiceRef.current;
+    const utterance = new SpeechSynthesisUtterance(speechText);
 
     speechInFlightRef.current = true;
     utterance.lang = speechLanguage;
     if (matchingVoice) utterance.voice = matchingVoice;
-    utterance.rate = speechLanguage === "hi-IN" ? 0.9 : 1;
-    utterance.pitch = speechLanguage === "hi-IN" ? 1 : 1.02;
+    const punctuationCount = (speechText.match(/[,.!?।]/g) ?? []).length;
+    const punctuationWeight = Math.min(0.06, punctuationCount * 0.01);
+    utterance.rate = speechLanguage === "hi-IN" ? 0.9 - punctuationWeight * 0.35 : 0.97 - punctuationWeight * 0.4;
+    utterance.pitch = speechLanguage === "hi-IN" ? 1.01 : 1.03;
     utterance.volume = 1;
     utterance.onstart = () => {
       setVoicePhase("speaking");
@@ -477,7 +576,8 @@ export default function ChatPage() {
         speechEnergyDecayTimerRef.current = null;
       }
       setVoiceEnergy(0.24);
-      flushSpeechQueue();
+      const pauseMs = /[.!?।]\s*$/.test(speechText) ? 120 : 55;
+      window.setTimeout(() => flushSpeechQueue(), pauseMs);
     };
     utterance.onerror = () => {
       speechInFlightRef.current = false;
@@ -491,7 +591,7 @@ export default function ChatPage() {
         speechEnergyDecayTimerRef.current = null;
       }
       setVoiceEnergy(0.24);
-      flushSpeechQueue();
+      window.setTimeout(() => flushSpeechQueue(), 40);
     };
 
     window.speechSynthesis.resume();
@@ -518,7 +618,9 @@ export default function ChatPage() {
       return;
     }
 
-    latestAssistantSpeechRef.current = cleanSpeechText(text);
+    responseSpeechLanguageRef.current = detectMessageLanguage(text, activeLanguageRef.current);
+    responseVoiceRef.current = null;
+    latestAssistantSpeechRef.current = getHumanizedSpeechText(text);
     speechQueueRef.current = chunkTextForSpeech(text);
     speechInFlightRef.current = false;
     interruptionHandledRef.current = false;
@@ -569,13 +671,21 @@ export default function ChatPage() {
     setVoicePhase(options?.fromVoice || voiceMode ? "thinking" : "idle");
     if (options?.fromVoice) shouldResumeListeningRef.current = voiceMode;
     setActiveLanguage(detectedLanguage);
+    responseSpeechLanguageRef.current = detectedLanguage;
+    responseVoiceRef.current = null;
     stopListening();
     stopSpeaking();
+    streamingSpeechBufferRef.current = "";
+    streamSpeechStoppedRef.current = false;
+    requestAbortRef.current?.abort();
+    const controller = new AbortController();
+    requestAbortRef.current = controller;
 
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({ messages: updated, sessionId: activeSessionId, preferredLanguage: detectedLanguage }),
       });
 
@@ -592,24 +702,48 @@ export default function ChatPage() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let accumulated = "";
+      const assistantIndex = updated.length;
+      setMessages((current) => [...current, { role: "assistant", content: "" }]);
+      setStreamingAssistant(true);
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        accumulated += decoder.decode(value, { stream: true });
+        const chunk = decoder.decode(value, { stream: true });
+        if (!chunk) continue;
+
+        accumulated += chunk;
+        queueStreamingSpeech(chunk);
+        setMessages((current) => {
+          const next = [...current];
+          if (next[assistantIndex]?.role === "assistant") {
+            next[assistantIndex] = { role: "assistant", content: accumulated };
+          }
+          return next;
+        });
       }
 
       if (accumulated) {
-        setMessages((current) => [...current, { role: "assistant", content: accumulated }]);
-        speak(accumulated);
+        if (voiceMode && !streamSpeechStoppedRef.current) {
+          queueStreamingSpeech("", true);
+        } else {
+          speak(accumulated);
+        }
       } else {
+        setMessages((current) => current.filter((_, index) => index !== assistantIndex));
         setVoicePhase("idle");
       }
-    } catch {
-      speak("Connection error. Please try again.");
-      setVoicePhase("idle");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setVoicePhase("idle");
+      } else {
+        speak("Connection error. Please try again.");
+        setVoicePhase("idle");
+      }
     } finally {
+      setStreamingAssistant(false);
       setLoading(false);
+      requestAbortRef.current = null;
       window.setTimeout(() => inputRef.current?.focus(), 50);
     }
   }
@@ -674,11 +808,6 @@ export default function ChatPage() {
           }}
         >
           <div className="voice-stage-backdrop" />
-          <div className={`voice-stage-orb voice-orb-${voicePhase}`} />
-          <div
-            className={`voice-spectrum ${voicePhase === "speaking" ? "voice-spectrum-active" : ""}`}
-            style={voiceSpectrumStyle}
-          />
           <div className="voice-stage-status" onClick={(event) => event.stopPropagation()}>
             {voicePhase === "listening"
               ? "Listening"
@@ -818,7 +947,7 @@ export default function ChatPage() {
               </div>
             ) : null}
 
-            {loading ? (
+            {loading && !streamingAssistant ? (
               <div className="flex gap-2 sm:gap-4">
                 <div
                   className="flex h-7 w-7 flex-shrink-0 items-center justify-center overflow-hidden rounded-full sm:h-8 sm:w-8"
@@ -834,6 +963,29 @@ export default function ChatPage() {
                     Luna is thinking...
                   </span>
                 </div>
+              </div>
+            ) : null}
+
+            {!loading && messages.length > 0 && messages[messages.length - 1]?.role === "assistant" ? (
+              <div className="ml-9 flex flex-wrap gap-2 sm:ml-10">
+                {getSmartFollowUps().map((prompt, index) => (
+                  <button
+                    key={`${prompt}-${index}`}
+                    onClick={() => void send(prompt)}
+                    className="rounded-full border px-3 py-1.5 text-xs transition-colors"
+                    style={{ borderColor: "var(--border)", background: "var(--bg-subtle)", color: "var(--fg-muted)" }}
+                    onMouseEnter={(event) => {
+                      event.currentTarget.style.background = "var(--bg-muted)";
+                      event.currentTarget.style.color = "var(--fg)";
+                    }}
+                    onMouseLeave={(event) => {
+                      event.currentTarget.style.background = "var(--bg-subtle)";
+                      event.currentTarget.style.color = "var(--fg-muted)";
+                    }}
+                  >
+                    {prompt}
+                  </button>
+                ))}
               </div>
             ) : null}
 
@@ -878,7 +1030,7 @@ export default function ChatPage() {
               disabled={loading}
               rows={1}
               className="max-h-32 flex-1 resize-none overflow-y-auto bg-transparent text-sm leading-normal focus:outline-none sm:max-h-40"
-              style={{ color: "var(--fg)", paddingTop: "2px", paddingBottom: "2px" }}
+              style={{ color: "var(--fg)", paddingTop: "4px", paddingBottom: "1px" }}
               onInput={(event) => {
                 const textArea = event.currentTarget;
                 textArea.style.height = "auto";
@@ -886,22 +1038,38 @@ export default function ChatPage() {
               }}
             />
 
-            <button
-              onClick={() => void send(input)}
-              disabled={loading || !input.trim()}
-              className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-indigo-600 transition-all duration-150 hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-30 ${
-                input.trim() ? "pointer-events-auto scale-100 opacity-100" : "pointer-events-none scale-75 opacity-0"
-              }`}
-            >
-              <ArrowUp className="h-4 w-4 text-white" />
-            </button>
+            {loading ? (
+              <button
+                type="button"
+                onClick={() => {
+                  streamSpeechStoppedRef.current = true;
+                  requestAbortRef.current?.abort();
+                  stopSpeaking();
+                }}
+                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-[var(--border)] text-xs font-semibold text-[var(--fg-muted)] transition hover:text-[var(--fg)]"
+                aria-label="Stop generating"
+                title="Stop generating"
+              >
+                ■
+              </button>
+            ) : (
+              <button
+                onClick={() => void send(input)}
+                disabled={!input.trim()}
+                className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-indigo-600 transition-all duration-150 hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-30 ${
+                  input.trim() ? "pointer-events-auto scale-100 opacity-100" : "pointer-events-none scale-75 opacity-0"
+                }`}
+              >
+                <ArrowUp className="h-4 w-4 text-white" />
+              </button>
+            )}
           </div>
           <p className="mt-1.5 hidden text-center text-xs sm:mt-2 sm:block" style={{ color: "var(--fg-subtle)" }}>
-            Press Enter to send - Shift+Enter for new line - Voice replies in {getLanguageLabel(activeLanguage)} ({getLanguageLabel(browserLanguage)} browser)
+            Luna can make mistakes. Please verify important details.
           </p>
           <p className="mt-1 text-center text-[11px] sm:hidden" style={{ color: "var(--fg-subtle)" }}>
             <Sparkles className="mr-1 inline h-3 w-3" />
-            Voice replies in {getLanguageLabel(activeLanguage)}
+            Luna can make mistakes. Please verify key details.
           </p>
         </div>
       </div>
