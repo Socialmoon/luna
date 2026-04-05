@@ -33,6 +33,9 @@ Goals:
 - If the user writes in Hindi, reply in natural, easy Hindi that feels supportive and human, similar to a friendly real conversation.
 - If the user writes in English, reply in warm, simple English.
 - Use persuasive but honest language that builds trust and helps the user feel confident to move forward.
+- Be proactively consultative: understand the user's goal, expectations, budget comfort, and timeline gradually through natural conversation.
+- Ask only one discovery question at a time, and only after giving some useful value first.
+- Never sound pushy, desperate, or salesy; keep discovery light and respectful.
 - Negotiate respectfully when users ask about discounts or flexibility.
 - When the user seems interested in moving forward, ask for contact details (email + phone).
 - If user reports a problem, ask for contact details so the team can follow up.
@@ -340,6 +343,84 @@ function needsClarifyingQuestion(latestUserMessage: string) {
   return !hasSignal || !hasSpecificData;
 }
 
+type DiscoveryField = "goal" | "expectation" | "budget" | "timeline";
+
+type DiscoverySnapshot = {
+  goalKnown: boolean;
+  expectationKnown: boolean;
+  budgetKnown: boolean;
+  timelineKnown: boolean;
+  assistantAskedDiscoveryRecently: boolean;
+};
+
+function buildDiscoverySnapshot(messages: SanitizedMessage[]): DiscoverySnapshot {
+  const userMessages = getUserMessages(messages);
+  const assistantMessages = messages.filter((message) => message.role === "assistant");
+  const userText = userMessages.map((message) => message.content.toLowerCase()).join("\n");
+  const recentAssistantText = assistantMessages.slice(-2).map((message) => message.content.toLowerCase()).join("\n");
+
+  const goalKnown =
+    /(goal|target|objective|want to|need to|looking to|grow|scale|increase|improve|leads|sales|revenue|traffic|conversion|awareness|appointments)/i.test(
+      userText
+    );
+
+  const expectationKnown = /(expect|expectation|outcome|result|kpi|roi|roas|cpl|cac|benchmark|success looks like)/i.test(userText);
+
+  const budgetKnown =
+    /(budget|spend|ad spend|price range|range|per month|monthly|₹|\$|rs\.?\s?\d|inr\s?\d|usd\s?\d)/i.test(userText);
+
+  const timelineKnown = /(timeline|when|how soon|weeks?|months?|quarter|deadline|urgent|asap|by\s+[a-z]+)/i.test(userText);
+
+  const assistantAskedDiscoveryRecently = /(goal|expectation|budget|timeline|how soon|what result|what outcome).{0,50}\?/i.test(recentAssistantText);
+
+  return {
+    goalKnown,
+    expectationKnown,
+    budgetKnown,
+    timelineKnown,
+    assistantAskedDiscoveryRecently,
+  };
+}
+
+function pickNextDiscoveryField(snapshot: DiscoverySnapshot): DiscoveryField | null {
+  if (!snapshot.goalKnown) return "goal";
+  if (!snapshot.expectationKnown) return "expectation";
+  if (!snapshot.budgetKnown) return "budget";
+  if (!snapshot.timelineKnown) return "timeline";
+  return null;
+}
+
+function buildDiscoveryInstruction(messages: SanitizedMessage[]) {
+  const snapshot = buildDiscoverySnapshot(messages);
+  const nextField = pickNextDiscoveryField(snapshot);
+
+  if (!nextField) {
+    return [
+      "Discovery behavior:",
+      "- You already have key qualification context. Focus on specific recommendations and natural next step guidance.",
+      "- Keep tone confident but relaxed, never pushy.",
+    ].join("\n");
+  }
+
+  const fieldPromptMap: Record<DiscoveryField, string> = {
+    goal: "Ask one soft question to clarify their main business goal.",
+    expectation: "Ask one soft question to clarify what outcome they expect.",
+    budget: "Ask one gentle budget-comfort question. If user avoids budget, offer broad ranges and move on.",
+    timeline: "Ask one soft question about desired timeline or urgency.",
+  };
+
+  return [
+    "Discovery behavior:",
+    "- Be consultative and natural, not salesy.",
+    "- Ask at most ONE discovery question in this reply.",
+    "- Give practical value first, then ask the question.",
+    "- Do not repeat the same discovery question if you asked it very recently.",
+    snapshot.assistantAskedDiscoveryRecently
+      ? "- You asked a discovery question recently, so prioritize answering and avoid asking another unless essential."
+      : `- Preferred discovery focus now: ${nextField}. ${fieldPromptMap[nextField]}`,
+  ].join("\n");
+}
+
 function shouldAskForContact(messages: SanitizedMessage[]) {
   const userMessages = getUserMessages(messages);
   const combined = userMessages.map((m) => m.content).join("\n");
@@ -365,6 +446,7 @@ function buildConversationStateInstruction(messages: SanitizedMessage[]) {
   const negotiationDetected = userMessages.some((message) => detectNegotiation(message.content));
   const clarifierNeeded = needsClarifyingQuestion(latestUser);
   const askForContact = shouldAskForContact(messages);
+  const discoveryInstruction = buildDiscoveryInstruction(messages);
 
   const instructions = [
     "Conversation state and behavior:",
@@ -380,6 +462,7 @@ function buildConversationStateInstruction(messages: SanitizedMessage[]) {
       : "- Ask for contact details only if user is ready to move forward or requests follow-up.",
     "- If exact pricing is not confirmed in chat context, provide a transparent range and mention it depends on scope.",
     "- Do not invent case studies, metrics, guarantees, or internal policies.",
+    discoveryInstruction,
   ];
 
   return instructions.join("\n");
