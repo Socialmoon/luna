@@ -27,7 +27,7 @@ declare global {
     start: () => void;
     stop: () => void;
     abort: () => void;
-    onresult: ((event: SpeechRecognitionEvent) => void) | null;
+    onresult: ((event: Event) => void) | null;
     onerror: ((event: Event) => void) | null;
     onend: (() => void) | null;
   }
@@ -863,7 +863,7 @@ export default function ChatPage() {
   const voiceSpectrumStyle = { "--voice-energy": String(voiceEnergy) } as CSSProperties;
 
   return (
-    <div className="flex h-screen flex-col" style={{ background: "var(--bg)", color: "var(--fg)" }}>
+    <div className="flex h-[100dvh] min-h-[100dvh] flex-col" style={{ background: "var(--bg)", color: "var(--fg)" }}>
       <style>{`
         @keyframes thinking-dot {
           0%, 80%, 100% { transform: scale(0.6); opacity: 0.3; }

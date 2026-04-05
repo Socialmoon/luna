@@ -39,7 +39,7 @@ function AdminLoginForm() {
 
   return (
     <div
-      className="flex min-h-screen items-center justify-center px-4"
+      className="flex min-h-[100dvh] items-center justify-center px-4"
       style={{
         background:
           "radial-gradient(circle at top, rgba(59,130,246,0.18), transparent 30%), radial-gradient(circle at bottom right, rgba(249,115,22,0.14), transparent 28%), var(--bg)",
@@ -106,7 +106,7 @@ function AdminLoginForm() {
 
 export default function AdminLoginPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-[var(--bg)]" />}>
+    <Suspense fallback={<div className="min-h-[100dvh] bg-[var(--bg)]" />}>
       <AdminLoginForm />
     </Suspense>
   );

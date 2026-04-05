@@ -84,7 +84,7 @@ export default function LeadsDashboardClient() {
   );
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)]">
+    <div className="min-h-[100dvh] bg-[var(--bg)] text-[var(--fg)]">
       <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
         <header className="flex flex-col gap-4 border-b border-[var(--border)] py-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
