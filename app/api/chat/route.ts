@@ -9,7 +9,6 @@ const MAX_ASSISTANT_REPLY_LENGTH = 2400;
 const SUPABASE_PERSISTENCE_PAUSE_MS = 5 * 60 * 1000;
 const DB_RETRY_ATTEMPTS = 3;
 const DB_RETRY_BASE_DELAY_MS = 350;
-const STREAM_CHUNK_SIZE = 34;
 const ALLOWED_ROLES = new Set(["user", "assistant"]);
 
 let supabasePersistencePausedUntil = 0;
@@ -312,28 +311,6 @@ async function withDbRetry<T extends { error: unknown }>(
   }
 
   return lastResult as T;
-}
-
-function chunkTextForStream(text: string) {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (!normalized) return [];
-
-  const words = normalized.split(" ");
-  const chunks: string[] = [];
-  let current = "";
-
-  for (const word of words) {
-    const candidate = current ? `${current} ${word}` : word;
-    if (candidate.length > STREAM_CHUNK_SIZE && current) {
-      chunks.push(`${current} `);
-      current = word;
-      continue;
-    }
-    current = candidate;
-  }
-
-  if (current) chunks.push(current);
-  return chunks;
 }
 
 function handleSupabasePersistenceError(scope: string, error: unknown) {
@@ -722,39 +699,48 @@ export async function POST(req: NextRequest) {
       console.error("[/api/chat] Failed to persist conversation", error);
     });
 
-    let assistantReply = await generateAssistantReply(
-      sanitized,
-      languageHint,
-      languageStyleInstruction,
-      stateInstruction
-    );
-
-    if (isWeakAssistantReply(assistantReply)) {
-      assistantReply = await generateAssistantReply(
-        sanitized,
-        languageHint,
-        languageStyleInstruction,
-        stateInstruction,
-        "Recovery mode: Provide one direct useful answer first, with concrete and realistic next steps. Keep it concise and human."
-      );
-    }
-
-    if (!assistantReply) {
-      assistantReply = buildFallbackResponse(latestUserMessage);
-    }
-
     const encoder = new TextEncoder();
-    const chunks = chunkTextForStream(assistantReply);
+    let assistantReply = "";
+    const completion = await nvidia.chat.completions.create({
+      model: NVIDIA_MODELS.reasoning,
+      max_tokens: 320,
+      temperature: 0.35,
+      top_p: 0.9,
+      stream: true,
+      messages: [
+        {
+          role: "system",
+          content: [
+            SYSTEM_PROMPT,
+            `Preferred speaking language hint: ${languageHint}.`,
+            languageStyleInstruction,
+            stateInstruction,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        },
+        ...sanitized,
+      ],
+    });
+
     const responseStream = new ReadableStream({
       async start(controller) {
         try {
-          for (const chunk of chunks) {
-            controller.enqueue(encoder.encode(chunk));
-            await wait(12);
+          for await (const chunk of completion) {
+            const delta = chunk.choices[0]?.delta?.content ?? "";
+            if (!delta) continue;
+
+            assistantReply += delta;
+            controller.enqueue(encoder.encode(delta));
+          }
+
+          if (!assistantReply.trim()) {
+            assistantReply = buildFallbackResponse(latestUserMessage);
+            controller.enqueue(encoder.encode(assistantReply));
           }
 
           await persistConversationTask;
-          await persistAssistantReply(resolvedSessionId, assistantReply);
+          await persistAssistantReply(resolvedSessionId, normalizeAssistantReply(assistantReply));
         } catch (streamError) {
           console.error("[/api/chat] Response stream error", streamError);
         } finally {

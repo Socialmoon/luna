@@ -2,16 +2,17 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import Image from "next/image";
-import { ArrowUp, Mic, Sparkles } from "lucide-react";
+import { ArrowUp, Sparkles } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { AppLogo } from "@/components/app-logo";
+import { recordAudioUntilSilence } from "@/lib/audio-recorder";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
 }
 
-type VoicePhase = "idle" | "listening" | "thinking" | "speaking";
+type VoicePhase = "idle" | "listening" | "recording" | "thinking" | "speaking";
 
 declare global {
   interface Window {
@@ -30,20 +31,22 @@ declare global {
     onerror: ((event: Event) => void) | null;
     onend: (() => void) | null;
   }
-
-  interface SpeechRecognitionEvent extends Event {
-    resultIndex: number;
-    results: {
-      [index: number]: {
-        isFinal?: boolean;
-        [index: number]: {
-          transcript: string;
-        };
-      };
-      length: number;
-    };
-  }
 }
+
+type SpeechRecognitionResultLike = {
+  isFinal?: boolean;
+  [index: number]: {
+    transcript: string;
+  };
+};
+
+type SpeechRecognitionEventLike = Event & {
+  resultIndex: number;
+  results: {
+    [index: number]: SpeechRecognitionResultLike;
+    length: number;
+  };
+};
 
 function renderMarkdown(text: string) {
   const parts: ReactNode[] = [];
@@ -202,10 +205,12 @@ export default function ChatPage() {
   const [activeLanguage, setActiveLanguage] = useState("en-US");
   const [speechReady, setSpeechReady] = useState(false);
   const [voiceEnergy, setVoiceEnergy] = useState(0.25);
+  const [audioCaptureSupported, setAudioCaptureSupported] = useState(false);
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const recognitionActiveRef = useRef(false);
   const shouldResumeListeningRef = useRef(false);
+  const browserVoiceSupportedRef = useRef(false);
   const transcriptBufferRef = useRef("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -221,11 +226,14 @@ export default function ChatPage() {
   const latestAssistantSpeechRef = useRef("");
   const speakingListenDelayTimerRef = useRef<number | null>(null);
   const interruptionHandledRef = useRef(false);
+  const interruptionRestartPendingRef = useRef(false);
   const requestAbortRef = useRef<AbortController | null>(null);
   const streamingSpeechBufferRef = useRef("");
   const streamSpeechStoppedRef = useRef(false);
   const responseSpeechLanguageRef = useRef("en-US");
   const responseVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const fallbackRecordingAbortRef = useRef<AbortController | null>(null);
+  const fallbackRecordingActiveRef = useRef(false);
 
   function getSmartFollowUps() {
     const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant")?.content.toLowerCase() ?? "";
@@ -266,6 +274,13 @@ export default function ChatPage() {
     const detectedBrowserLanguage = normalizeLanguageTag(window.navigator.language);
     setBrowserLanguage(detectedBrowserLanguage);
     setActiveLanguage(detectedBrowserLanguage);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const canRecord = Boolean(navigator.mediaDevices?.getUserMedia) && Boolean(window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext);
+    setAudioCaptureSupported(canRecord);
   }, []);
 
   useEffect(() => {
@@ -361,10 +376,12 @@ export default function ChatPage() {
     const canSpeak = typeof window !== "undefined" && "speechSynthesis" in window;
 
     if (!Recognition || !canSpeak) {
+      browserVoiceSupportedRef.current = false;
       setVoiceSupported(false);
       return;
     }
 
+    browserVoiceSupportedRef.current = true;
     setVoiceSupported(true);
     const recognition = new Recognition();
     recognition.continuous = false;
@@ -372,11 +389,12 @@ export default function ChatPage() {
     recognition.lang = activeLanguageRef.current;
 
     recognition.onresult = (event) => {
+      const recognitionEvent = event as SpeechRecognitionEventLike;
       let interim = "";
       let finalText = transcriptBufferRef.current;
 
-      for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        const result = event.results[i];
+      for (let i = recognitionEvent.resultIndex; i < recognitionEvent.results.length; i += 1) {
+        const result = recognitionEvent.results[i];
         const transcript = result[0]?.transcript?.trim() ?? "";
         if (!transcript) continue;
 
@@ -392,6 +410,7 @@ export default function ChatPage() {
       if (voiceMode && isSpeaking && combined && !isLikelyAssistantEcho(combined)) {
         if (!interruptionHandledRef.current) {
           interruptionHandledRef.current = true;
+          interruptionRestartPendingRef.current = true;
           streamSpeechStoppedRef.current = true;
           requestAbortRef.current?.abort();
           stopSpeaking();
@@ -442,6 +461,8 @@ export default function ChatPage() {
   useEffect(() => {
     if (!voiceMode) {
       shouldResumeListeningRef.current = false;
+      fallbackRecordingAbortRef.current?.abort();
+      fallbackRecordingActiveRef.current = false;
       stopListening();
       stopSpeaking();
       if (!loading) setVoicePhase("idle");
@@ -449,8 +470,11 @@ export default function ChatPage() {
     }
 
     shouldResumeListeningRef.current = true;
-    if (!loading && voiceSupported) startListening();
-  }, [loading, voiceMode, voiceSupported]);
+    if (!loading) {
+      if (browserVoiceSupportedRef.current && voiceSupported) startListening();
+      else if (audioCaptureSupported) void startFallbackRecording();
+    }
+  }, [loading, voiceMode, voiceSupported, audioCaptureSupported]);
 
   function startListening() {
     const recognition = recognitionRef.current;
@@ -478,6 +502,8 @@ export default function ChatPage() {
   function stopSpeaking() {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
     window.speechSynthesis.cancel();
+    fallbackRecordingAbortRef.current?.abort();
+    fallbackRecordingActiveRef.current = false;
     pendingSpeechRef.current = null;
     speechQueueRef.current = [];
     speechInFlightRef.current = false;
@@ -498,10 +524,65 @@ export default function ChatPage() {
   function closeVoiceAgent() {
     setVoiceMode(false);
     setVoiceOpen(false);
+    fallbackRecordingAbortRef.current?.abort();
+    fallbackRecordingActiveRef.current = false;
     stopListening();
     stopSpeaking();
     setVoicePhase("idle");
     setInterimTranscript("");
+  }
+
+  async function startFallbackRecording() {
+    if (!voiceMode || loading || fallbackRecordingActiveRef.current || !audioCaptureSupported) return;
+
+    fallbackRecordingActiveRef.current = true;
+    fallbackRecordingAbortRef.current?.abort();
+    const controller = new AbortController();
+    fallbackRecordingAbortRef.current = controller;
+    setVoicePhase("recording");
+
+    try {
+      const audioBlob = await recordAudioUntilSilence({
+        signal: controller.signal,
+        silenceThreshold: 0.012,
+        silenceDurationMs: 1200,
+        maxDurationMs: 12000,
+      });
+
+      if (controller.signal.aborted) return;
+
+      setVoicePhase("thinking");
+      const formData = new FormData();
+      formData.set("file", audioBlob, "luna-voice.wav");
+      formData.set("language", activeLanguageRef.current);
+
+      const response = await fetch("/api/riva/transcribe", {
+        method: "POST",
+        body: formData,
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(typeof payload.error === "string" ? payload.error : "Speech transcription failed.");
+      }
+
+      const payload = await response.json().catch(() => ({}));
+      const transcript = typeof payload.text === "string" ? payload.text.trim() : "";
+      if (!transcript) {
+        setVoicePhase("idle");
+        return;
+      }
+
+      void send(transcript, { fromVoice: true });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      speak("I could not hear that clearly. Please try again.");
+      setVoicePhase("idle");
+    } finally {
+      fallbackRecordingActiveRef.current = false;
+      fallbackRecordingAbortRef.current = null;
+    }
   }
 
   function flushSpeechQueue() {
@@ -511,8 +592,23 @@ export default function ChatPage() {
     const nextChunk = speechQueueRef.current.shift();
     if (!nextChunk) {
       interruptionHandledRef.current = false;
-      if (voiceMode && shouldResumeListeningRef.current && !loading) startListening();
-      else if (!loading) setVoicePhase("idle");
+      const restartAfterInterruption = interruptionRestartPendingRef.current;
+      interruptionRestartPendingRef.current = false;
+      if (voiceMode && shouldResumeListeningRef.current && !loading) {
+        if (browserVoiceSupportedRef.current && voiceSupported) startListening();
+        else if (audioCaptureSupported) {
+          window.setTimeout(() => {
+            void startFallbackRecording();
+          }, 650);
+        }
+      }
+      else if (!loading) {
+        if (restartAfterInterruption && voiceMode && browserVoiceSupportedRef.current && voiceSupported) {
+          window.setTimeout(() => startListening(), 60);
+        } else {
+          setVoicePhase("idle");
+        }
+      }
       return;
     }
 
@@ -545,7 +641,7 @@ export default function ChatPage() {
         speakingListenDelayTimerRef.current = window.setTimeout(() => {
           speakingListenDelayTimerRef.current = null;
           startListening();
-        }, 450);
+        }, 120);
       }
     };
     utterance.onboundary = (event) => {
@@ -600,7 +696,10 @@ export default function ChatPage() {
 
   function speak(text: string) {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) {
-      if (voiceMode && shouldResumeListeningRef.current && !loading) startListening();
+      if (voiceMode && shouldResumeListeningRef.current && !loading) {
+        if (browserVoiceSupportedRef.current && voiceSupported) startListening();
+        else if (audioCaptureSupported) void startFallbackRecording();
+      }
       else setVoicePhase("idle");
       return;
     }
@@ -624,6 +723,7 @@ export default function ChatPage() {
     speechQueueRef.current = chunkTextForSpeech(text);
     speechInFlightRef.current = false;
     interruptionHandledRef.current = false;
+    interruptionRestartPendingRef.current = false;
     pendingSpeechRef.current = null;
     window.speechSynthesis.cancel();
     window.speechSynthesis.resume();
@@ -680,6 +780,9 @@ export default function ChatPage() {
     requestAbortRef.current?.abort();
     const controller = new AbortController();
     requestAbortRef.current = controller;
+    const assistantIndex = updated.length;
+    setMessages((current) => [...current, { role: "assistant", content: "..." }]);
+    setStreamingAssistant(true);
 
     try {
       const res = await fetch("/api/chat", {
@@ -693,6 +796,7 @@ export default function ChatPage() {
       if (responseSessionId && responseSessionId !== sessionId) setSessionId(responseSessionId);
 
       if (!res.ok || !res.body) {
+        setMessages((current) => current.filter((_, index) => index !== assistantIndex));
         const data = await res.json().catch(() => ({}));
         speak(data.error ?? "Sorry, something went wrong.");
         setVoicePhase("idle");
@@ -702,9 +806,6 @@ export default function ChatPage() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let accumulated = "";
-      const assistantIndex = updated.length;
-      setMessages((current) => [...current, { role: "assistant", content: "" }]);
-      setStreamingAssistant(true);
 
       while (true) {
         const { done, value } = await reader.read();
@@ -735,8 +836,10 @@ export default function ChatPage() {
       }
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
+        setMessages((current) => current.filter((_, index) => index !== assistantIndex));
         setVoicePhase("idle");
       } else {
+        setMessages((current) => current.filter((_, index) => index !== assistantIndex));
         speak("Connection error. Please try again.");
         setVoicePhase("idle");
       }
@@ -756,11 +859,25 @@ export default function ChatPage() {
   }
 
   const isEmpty = messages.length === 0;
-  const voiceStageVisible = voiceOpen || voiceMode;
+  const voiceStageVisible = false;
   const voiceSpectrumStyle = { "--voice-energy": String(voiceEnergy) } as CSSProperties;
 
   return (
     <div className="flex h-screen flex-col" style={{ background: "var(--bg)", color: "var(--fg)" }}>
+      <style>{`
+        @keyframes thinking-dot {
+          0%, 80%, 100% { transform: scale(0.6); opacity: 0.3; }
+          40% { transform: scale(1); opacity: 1; }
+        }
+        @keyframes thinking-glow {
+          0%, 100% { box-shadow: 0 0 0px 0px rgba(99,102,241,0); transform: translateY(0); }
+          50% { box-shadow: 0 0 12px 3px rgba(99,102,241,0.22); transform: translateY(-1px); }
+        }
+        .thinking-bubble { animation: thinking-glow 2s ease-in-out infinite; }
+        .thinking-dot-1 { animation: thinking-dot 1.2s ease-in-out infinite 0ms; }
+        .thinking-dot-2 { animation: thinking-dot 1.2s ease-in-out infinite 200ms; }
+        .thinking-dot-3 { animation: thinking-dot 1.2s ease-in-out infinite 400ms; }
+      `}</style>
       <header className="flex items-center justify-between px-4 py-2.5 sm:px-6 sm:py-3" style={{ borderBottom: "1px solid var(--border)" }}>
         <div className="flex items-center gap-2">
           <AppLogo height={22} />
@@ -800,24 +917,7 @@ export default function ChatPage() {
       </header>
 
       <div className="relative flex-1 overflow-y-auto">
-        <div
-          className={`voice-stage ${voiceStageVisible ? "voice-stage-visible" : ""}`}
-          onClick={(event) => {
-            event.preventDefault();
-            if (voiceStageVisible) closeVoiceAgent();
-          }}
-        >
-          <div className="voice-stage-backdrop" />
-          <div className="voice-stage-status" onClick={(event) => event.stopPropagation()}>
-            {voicePhase === "listening"
-              ? "Listening"
-              : voicePhase === "thinking"
-                ? "Thinking"
-                : voicePhase === "speaking"
-                  ? "Speaking"
-                  : "Voice mode"}
-          </div>
-        </div>
+        {/* Voice agent temporarily disabled until interruption handling is finalized. */}
 
         {isEmpty ? (
           <div className="flex h-full flex-col items-center justify-center pb-28 sm:pb-32">
@@ -834,19 +934,6 @@ export default function ChatPage() {
               .marquee-right { animation: marquee-right 32s linear infinite; }
               .marquee-wrap:hover .marquee-left,
               .marquee-wrap:hover .marquee-right { animation-play-state: paused; }
-
-              @keyframes thinking-dot {
-                0%, 80%, 100% { transform: scale(0.6); opacity: 0.3; }
-                40%            { transform: scale(1);   opacity: 1;   }
-              }
-              @keyframes thinking-glow {
-                0%, 100% { box-shadow: 0 0 0px 0px rgba(99,102,241,0); }
-                50%       { box-shadow: 0 0 12px 3px rgba(99,102,241,0.25); }
-              }
-              .thinking-bubble { animation: thinking-glow 2s ease-in-out infinite; }
-              .thinking-dot-1 { animation: thinking-dot 1.2s ease-in-out infinite 0ms; }
-              .thinking-dot-2 { animation: thinking-dot 1.2s ease-in-out infinite 200ms; }
-              .thinking-dot-3 { animation: thinking-dot 1.2s ease-in-out infinite 400ms; }
             `}</style>
 
             <div
@@ -928,7 +1015,20 @@ export default function ChatPage() {
                       : { background: "var(--bubble-ai-bg)", color: "var(--bubble-ai-fg)" }
                   }
                 >
-                  {message.role === "assistant" ? renderMarkdown(message.content) : message.content}
+                  {message.role === "assistant" && loading && index === messages.length - 1 && message.content === "..." ? (
+                    <div className="flex items-center gap-2 py-0.5">
+                      <span className="thinking-dot-1 h-2 w-2 rounded-full bg-indigo-400" />
+                      <span className="thinking-dot-2 h-2 w-2 rounded-full bg-indigo-400" />
+                      <span className="thinking-dot-3 h-2 w-2 rounded-full bg-indigo-400" />
+                      <span className="ml-1.5 text-xs" style={{ color: "var(--fg-subtle)" }}>
+                        Luna is thinking...
+                      </span>
+                    </div>
+                  ) : message.role === "assistant" ? (
+                    renderMarkdown(message.content)
+                  ) : (
+                    message.content
+                  )}
                 </div>
               </div>
             ))}
@@ -943,25 +1043,6 @@ export default function ChatPage() {
                   style={{ background: "var(--bg-subtle)", color: "var(--fg-muted)", border: "1px dashed var(--border-strong)" }}
                 >
                   {interimTranscript}
-                </div>
-              </div>
-            ) : null}
-
-            {loading && !streamingAssistant ? (
-              <div className="flex gap-2 sm:gap-4">
-                <div
-                  className="flex h-7 w-7 flex-shrink-0 items-center justify-center overflow-hidden rounded-full sm:h-8 sm:w-8"
-                  style={{ background: "var(--bg-subtle)", border: "1px solid var(--border)" }}
-                >
-                  <Image src="/logo.png" alt="Luna" width={28} height={28} className="object-contain" />
-                </div>
-                <div className="thinking-bubble flex items-center gap-2 rounded-2xl px-4 py-3 sm:px-5 sm:py-3.5" style={{ background: "var(--bubble-ai-bg)" }}>
-                  <span className="thinking-dot-1 h-2 w-2 rounded-full bg-indigo-400" />
-                  <span className="thinking-dot-2 h-2 w-2 rounded-full bg-indigo-400" />
-                  <span className="thinking-dot-3 h-2 w-2 rounded-full bg-indigo-400" />
-                  <span className="ml-1.5 text-xs" style={{ color: "var(--fg-subtle)" }}>
-                    Luna is thinking...
-                  </span>
                 </div>
               </div>
             ) : null}
@@ -1006,20 +1087,7 @@ export default function ChatPage() {
             className="chat-input-wrap relative flex items-center gap-2 rounded-2xl px-3 py-2 transition-all duration-150 sm:gap-3 sm:px-4 sm:py-2.5"
             style={{ background: "var(--input-bg)", border: "1px solid var(--input-border)" }}
           >
-            <button
-              type="button"
-              onClick={() => {
-                enableSpeechPlayback();
-                setVoiceOpen(true);
-                setVoiceMode(true);
-              }}
-              disabled={!voiceSupported}
-              className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg border border-[var(--border)] bg-transparent text-[var(--fg-muted)] transition hover:text-[var(--fg)] disabled:opacity-40"
-              aria-label="Talk to Luna"
-              title="Talk to Luna"
-            >
-              <Mic className="h-4 w-4" />
-            </button>
+            {/* Voice button disabled while the voice agent is being polished. */}
 
             <textarea
               ref={inputRef}

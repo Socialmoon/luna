@@ -23,7 +23,7 @@ Visitors open the chat, ask about SocialMoon's services (SEO, paid ads, social m
 
 ## Features
 
-- **Voice Agent** — Users can speak to Luna using browser speech-to-text and optionally hear spoken replies
+- **Voice Agent** — Users can speak to Luna with browser speech recognition when available, and a recording-based transcription fallback keeps voice usable on unsupported browsers
 - **Negotiation-Aware Responses** — Luna handles pricing discussions and identifies negotiation intent
 - **Auto Session Tracking** — Captures topic, latest query, negotiation flag, and contact details from each conversation
 - **Admin Dashboard** — `/leads` view shows tracked conversation sessions and captured contact info
