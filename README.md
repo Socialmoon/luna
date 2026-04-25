@@ -1,7 +1,7 @@
 ﻿<div align="center">
   <img src="./public/logo.png" alt="SocialMoon Logo" width="180" />
 
-  # SocialMoon AI Chat
+# SocialMoon AI Chat
 
   **Private Repository — Internal Use Only**
 
@@ -11,6 +11,7 @@
   ![OpenRouter](https://img.shields.io/badge/OpenRouter-Claude%20Sonnet-blueviolet?style=flat-square)
   ![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-3ecf8e?style=flat-square&logo=supabase)
   ![License](https://img.shields.io/badge/license-Private-red?style=flat-square)
+
 </div>
 
 ---
@@ -34,14 +35,14 @@ Visitors open the chat, ask about SocialMoon's services (SEO, paid ads, social m
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| **Framework** | Next.js 15 (App Router, Turbopack) |
-| **AI** | OpenRouter API — ``anthropic/claude-sonnet-4-5`` |
-| **Database** | Supabase (PostgreSQL) |
-| **Styling** | Tailwind CSS + CSS Variables |
-| **Theme** | next-themes |
-| **Deployment** | Vercel |
+| Layer                | Technology                                       |
+| -------------------- | ------------------------------------------------ |
+| **Framework**  | Next.js 15 (App Router, Turbopack)               |
+| **AI**         | OpenRouter API —``anthropic/claude-sonnet-4-5`` |
+| **Database**   | Supabase (PostgreSQL)                            |
+| **Styling**    | Tailwind CSS + CSS Variables                     |
+| **Theme**      | next-themes                                      |
+| **Deployment** | Vercel                                           |
 
 ---
 
@@ -124,13 +125,13 @@ Add environment variables in the Vercel dashboard under **Settings → Environme
 
 See [.env.example](.env.example) for the full list. Required keys:
 
-| Variable | Description |
-|---|---|
-| ``OPENROUTER_API_KEY`` | From [openrouter.ai/keys](https://openrouter.ai/keys) |
-| ``NEXT_PUBLIC_SUPABASE_URL`` | Supabase project URL |
-| ``NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY`` | Supabase publishable key |
-| ``SUPABASE_SERVICE_ROLE_KEY`` | Supabase service role key (server-only) |
-| ``DATABASE_URL`` | Supabase direct Postgres connection string |
+| Variable                                         | Description                                       |
+| ------------------------------------------------ | ------------------------------------------------- |
+| ``OPENROUTER_API_KEY``                           | From[openrouter.ai/keys](https://openrouter.ai/keys) |
+| ``NEXT_PUBLIC_SUPABASE_URL``                     | Supabase project URL                              |
+| ``NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY`` | Supabase publishable key                          |
+| ``SUPABASE_SERVICE_ROLE_KEY``                    | Supabase service role key (server-only)           |
+| ``DATABASE_URL``                                 | Supabase direct Postgres connection string        |
 
 ---
 
@@ -145,11 +146,11 @@ See [.env.example](.env.example) for the full list. Required keys:
 
 ## AI Models
 
-| Use | Model | Notes |
-|---|---|---|
-| Chat (Luna) | ``anthropic/claude-sonnet-4-5`` | Primary — best quality for sales conversations |
-| Fast / background | ``google/gemini-2.0-flash-001`` | Available for lower-cost tasks |
-| Advanced reasoning | ``anthropic/claude-opus-4`` | Reserved for future complex workflows |
+| Use                | Model                           | Notes                                           |
+| ------------------ | ------------------------------- | ----------------------------------------------- |
+| Chat (Luna)        | ``anthropic/claude-sonnet-4-5`` | Primary — best quality for sales conversations |
+| Fast / background  | ``google/gemini-2.0-flash-001`` | Available for lower-cost tasks                  |
+| Advanced reasoning | ``anthropic/claude-opus-4``     | Reserved for future complex workflows           |
 
 ---
 
@@ -160,20 +161,3 @@ See [.env.example](.env.example) for the full list. Required keys:
 - [ ] Calendar booking integration (discovery calls)
 - [ ] Email follow-up automation after lead capture
 - [ ] Analytics on common questions and conversion rates
-
----
-
-<div align="center">
-  <sub>Built for SocialMoon · Private &amp; Confidential</sub>
-</div>
-## Admin Dashboard Security
-
-Set these environment variables to protect the dashboard:
-
-```env
-ADMIN_EMAIL=admin@example.com
-ADMIN_PASSWORD=your-strong-password
-ADMIN_SESSION_SECRET=replace-with-a-long-random-secret
-```
-
-The `/leads` dashboard and `/api/leads` endpoints are protected by an admin login session.
