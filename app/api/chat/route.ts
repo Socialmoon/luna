@@ -14,10 +14,10 @@ const ALLOWED_ROLES = new Set(["user", "assistant"]);
 let supabasePersistencePausedUntil = 0;
 let supabasePauseWasLogged = false;
 
-const SYSTEM_PROMPT = `You are Luna, SocialMoon's friendly AI growth consultant.
+const SYSTEM_PROMPT = `You are Avena, SocialMoon's friendly AI growth consultant.
 
 Goals:
-- Help visitors with marketing strategy, services, pricing ranges, and timelines.
+- Help visitors with marketing strategy, services, and timelines.
 - Be concise, clear, and practical.
 - Keep answers short by default: usually 2-4 sentences.
 - If the user asks a broad question, give a compact answer first, then ask one short follow-up question.
@@ -33,10 +33,10 @@ Goals:
 - If the user writes in Hindi, reply in natural, easy Hindi that feels supportive and human, similar to a friendly real conversation.
 - If the user writes in English, reply in warm, simple English.
 - Use persuasive but honest language that builds trust and helps the user feel confident to move forward.
-- Be proactively consultative: understand the user's goal, expectations, budget comfort, and timeline gradually through natural conversation.
+- Be proactively consultative: understand the user's goal, expectations, and timeline gradually through natural conversation.
 - Ask only one discovery question at a time, and only after giving some useful value first.
 - Never sound pushy, desperate, or salesy; keep discovery light and respectful.
-- Negotiate respectfully when users ask about discounts or flexibility.
+- When pricing or specific packages come up, always suggest contacting the team for personalized options.
 - When the user seems interested in moving forward, ask for contact details (email + phone).
 - If user reports a problem, ask for contact details so the team can follow up.
 - Reply in Hindi if the user's latest message is in Hindi, otherwise reply in English.
@@ -44,7 +44,7 @@ Goals:
 - Keep responses interactive: end with one natural next-step question when useful.
 - Avoid fake certainty. If details are missing, say so briefly and ask for just the missing input.
 - Keep advice accurate to provided context. Never invent numbers, case studies, or guarantees.
-- Only answer questions related to SocialMoon, its services, marketing strategy, lead generation, paid ads, SEO, websites, branding, social media, pricing, onboarding, campaign planning, or support issues.
+- Only answer questions related to SocialMoon, its services, marketing strategy, lead generation, paid ads, SEO, websites, branding, social media, onboarding, campaign planning, or support issues.
 - If a request is unrelated to SocialMoon or digital marketing services, politely refuse and steer the user back to SocialMoon-related questions only.
 - Do not provide general knowledge, coding help, entertainment, politics, personal advice, schoolwork, or unrelated research.
 `;
@@ -65,13 +65,12 @@ const TOPIC_MAP: Record<string, string[]> = {
   "Branding": ["brand", "positioning", "identity", "messaging", "\u092c\u094d\u0930\u093e\u0902\u0921", "\u092c\u094d\u0930\u093e\u0902\u0921\u093f\u0902\u0917"],
   "Email Marketing": ["email", "automation", "drip", "klaviyo", "\u0908\u092e\u0947\u0932", "\u0911\u091f\u094b\u092e\u0947\u0936\u0928"],
   "Web/CRO": ["website", "landing page", "cro", "conversion", "\u0935\u0947\u092c\u0938\u093e\u0907\u091f", "\u0932\u0948\u0902\u0921\u093f\u0902\u0917 \u092a\u0947\u091c"],
-  "Pricing": ["price", "pricing", "cost", "budget", "quote", "\u0915\u0940\u092e\u0924", "\u092a\u094d\u0930\u093e\u0907\u0938", "\u092c\u091c\u091f", "\u0915\u094b\u091f"],
   "Support Issue": ["problem", "issue", "not working", "bug", "error", "complaint", "\u0938\u092e\u0938\u094d\u092f\u093e", "\u0926\u093f\u0915\u094d\u0915\u0924", "\u0915\u093e\u092e \u0928\u0939\u0940\u0902", "\u090f\u0930\u0930"],
 };
 
 const SOCIALMOON_RELEVANT_KEYWORDS = [
   "socialmoon",
-  "luna",
+  "avena",
   "marketing",
   "digital marketing",
   "lead generation",
@@ -91,10 +90,6 @@ const SOCIALMOON_RELEVANT_KEYWORDS = [
   "organic",
   "campaign",
   "strategy",
-  "pricing",
-  "price",
-  "budget",
-  "quote",
   "package",
   "service",
   "services",
@@ -154,7 +149,7 @@ function extractName(text: string): string | null {
 }
 
 function detectNegotiation(text: string): boolean {
-  return /(discount|negotiate|best price|lower (the )?price|deal|budget is tight|can you reduce|\u0915\u092e \u0915\u0930|\u091b\u0942\u091f|\u0921\u093f\u0938\u094d\u0915\u093e\u0909\u0902\u091f|\u0938\u0938\u094d\u0924\u093e|\u092c\u0947\u0938\u094d\u091f \u092a\u094d\u0930\u093e\u0907\u0938)/i.test(text);
+  return /(discount|negotiate|best price|lower (the )?price|deal|can you reduce|\u0915\u092e \u0915\u0930|\u091b\u0942\u091f|\u0921\u093f\u0938\u094d\u0915\u093e\u0909\u0902\u091f|\u0938\u0938\u094d\u0924\u093e|\u092c\u0947\u0938\u094d\u091f \u092a\u094d\u0930\u093e\u0907\u0938)/i.test(text);
 }
 
 function isHindiText(text: string) {
@@ -238,7 +233,7 @@ function isSocialMoonRelevant(messages: SanitizedMessage[]) {
 
   const latestOffTopicHits = OFF_TOPIC_PATTERNS.filter((pattern) => pattern.test(latestText)).length;
   const latestMarketingHint =
-    /(ads?|seo|marketing|campaign|leads?|conversion|branding|website|social media|content|pricing|package|service|business growth|support)/i.test(
+    /(ads?|seo|marketing|campaign|leads?|conversion|branding|website|social media|content|package|service|business growth|support)/i.test(
       latestText
     );
 
@@ -253,10 +248,10 @@ function isSocialMoonRelevant(messages: SanitizedMessage[]) {
 
 function buildOffTopicResponse(latestMessage: string) {
   if (isHindiText(latestMessage)) {
-    return "\u092e\u0948\u0902 \u0938\u093f\u0930\u094d\u095e SocialMoon \u0915\u0940 \u0938\u0930\u094d\u0935\u093f\u0938\u0947\u093c\u0938, marketing strategy, ads, SEO, website, branding, pricing \u092f\u093e support se jude sawaalon mein madad kar sakti hoon. Aap apna sawaal SocialMoon ya aapke business marketing goals se related poochiye.";
+    return "\u092e\u0948\u0902 \u0938\u093f\u0930\u094d\u092b SocialMoon \u0915\u0940 \u0938\u0930\u094d\u0935\u093f\u0938\u0947\u091c, marketing strategy, ads, SEO, website, branding \u092f\u093e support se jude sawaalon mein madad kar sakti \u0939\u0942\u0902. Pricing aur packages ke liye hamare team se contact karein. Aap apna sawaal SocialMoon ya aapke business marketing goals se related poochiye.";
   }
 
-  return "I can only help with SocialMoon-related questions like services, marketing strategy, ads, SEO, websites, branding, pricing, or support. Please ask something related to SocialMoon or your business growth needs.";
+  return "I can only help with SocialMoon-related questions like services, marketing strategy, ads, SEO, websites, branding, or support. For pricing and packages, please reach out to our team. Ask anything related to SocialMoon or your business growth needs.";
 }
 
 function getUserMessages(messages: SanitizedMessage[]) {
@@ -336,7 +331,7 @@ function needsClarifyingQuestion(latestUserMessage: string) {
   const lower = latestUserMessage.toLowerCase();
   if (lower.length < 14) return true;
 
-  const explicitQuestionSignals = ["how", "what", "why", "which", "cost", "price", "package", "help", "strategy"];
+  const explicitQuestionSignals = ["how", "what", "why", "which", "package", "help", "strategy"];
   const hasSignal = explicitQuestionSignals.some((signal) => lower.includes(signal));
   const hasSpecificData = /(google ads|meta ads|seo|website|landing page|social media|branding|budget|timeline|industry)/i.test(lower);
 
@@ -431,7 +426,7 @@ function shouldAskForContact(messages: SanitizedMessage[]) {
   const hasContact = hasEmail && hasPhone;
 
   const buyingIntent =
-    /(let'?s start|want to start|how do we begin|book|schedule|call me|contact me|proposal|quote|onboard|interested|move forward|pricing|price|cost)/i.test(
+    /(let'?s start|want to start|how do we begin|book|schedule|call me|contact me|proposal|quote|onboard|interested|move forward)/i.test(
       `${combined}\n${latest}`
     );
 
@@ -460,7 +455,6 @@ function buildConversationStateInstruction(messages: SanitizedMessage[]) {
     askForContact
       ? "- Ask politely for both email and phone at the end so the team can follow up."
       : "- Ask for contact details only if user is ready to move forward or requests follow-up.",
-    "- If exact pricing is not confirmed in chat context, provide a transparent range and mention it depends on scope.",
     "- Do not invent case studies, metrics, guarantees, or internal policies.",
     discoveryInstruction,
   ];
@@ -575,8 +569,7 @@ Rules:
 - If a value is missing, use null.
 - Keep the phone in a normalized compact form.
 - Do not guess or invent any email or phone number.
-- Detect whether the user is negotiating on pricing.
-- Topic should be a short label like Pricing, Support Issue, SEO, Paid Ads, Social Media, Branding, Email Marketing, Web/CRO, or General Inquiry.
+- Topic should be a short label like Support Issue, SEO, Paid Ads, Social Media, Branding, Email Marketing, Web/CRO, or General Inquiry.
 
 Conversation:
 ${conversationText}`;

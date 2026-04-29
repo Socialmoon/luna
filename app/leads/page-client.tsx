@@ -89,7 +89,7 @@ export default function LeadsDashboardClient() {
         <header className="flex flex-col gap-4 border-b border-[var(--border)] py-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <Link href="/chat" className="simple-link">
-              Back to Luna
+              Back to Chat
             </Link>
             <h1 className="mt-3 text-2xl font-semibold">Dashboard</h1>
             <p className="mt-1 text-sm text-[var(--fg-muted)]">Captured conversations and contact details.</p>

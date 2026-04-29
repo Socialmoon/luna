@@ -76,7 +76,7 @@ function renderMarkdown(text: string) {
 const ROW1 = [
   "How do you scale paid ads profitably?",
   "What ROI can I realistically expect?",
-  "How much does SocialMoon cost?",
+  "How can I get started with SocialMoon?",
   "Do you work with early-stage startups?",
   "Can you help with Google Ads specifically?",
   "What's your approach to brand strategy?",
@@ -91,7 +91,7 @@ const ROW2 = [
   "What does a discovery call look like?",
   "Do you handle social media content creation?",
   "What platforms do you run ads on?",
-  "Is pricing negotiable for startups?",
+  "Can you connect me with your team?",
   "How do you measure campaign success?",
 ];
 
@@ -239,21 +239,15 @@ export default function ChatPage() {
     const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant")?.content.toLowerCase() ?? "";
     const isHindi = activeLanguage === "hi-IN";
 
-    if (/price|pricing|budget|quote|cost/.test(latestAssistant)) {
-      return isHindi
-        ? ["Mere budget ke hisaab se best plan batao", "Kitne time mein result aayega?", "Kya flexible package possible hai?"]
-        : ["Suggest the best plan for my budget", "How soon can I expect results?", "Is there a flexible package option?"];
-    }
-
     if (/seo|ads|campaign|lead|social/.test(latestAssistant)) {
       return isHindi
-        ? ["Mere business ke liye first step kya hoga?", "Expected monthly budget kitna hona chahiye?", "Team se call schedule karna hai"]
-        : ["What should be my first step?", "What monthly budget do you recommend?", "I want to schedule a call with your team"];
+        ? ["Mere business ke liye first step kya hoga?", "Mujhe team se baat karni hai", "Team se call schedule karna hai"]
+        : ["What should be my first step?", "I want to talk to your team", "Can we schedule a call?"];
     }
 
     return isHindi
-      ? ["Mere business ke liye custom strategy do", "Pricing range share karo", "Mujhe team callback chahiye"]
-      : ["Give me a custom strategy for my business", "Share your pricing range", "I want a team callback"];
+      ? ["Mere business ke liye custom strategy do", "Mujhe team se baat karni hai", "Kya follow-up call schedule kar sakte ho?"]
+      : ["Give me a custom strategy for my business", "I want to talk to your team", "Can we schedule a follow-up call?"];
   }
 
   function createFreshSession() {
@@ -553,7 +547,7 @@ export default function ChatPage() {
 
       setVoicePhase("thinking");
       const formData = new FormData();
-      formData.set("file", audioBlob, "luna-voice.wav");
+      formData.set("file", audioBlob, "avena-voice.wav");
       formData.set("language", activeLanguageRef.current);
 
       const response = await fetch("/api/riva/transcribe", {
@@ -924,7 +918,7 @@ export default function ChatPage() {
             <AppLogo height={36} className="mb-4 sm:mb-6" />
             <h1 className="mb-2 px-4 text-center text-xl font-semibold sm:text-2xl">How can I help you today?</h1>
             <p className="mb-8 max-w-xs px-4 text-center text-sm sm:mb-10 sm:max-w-sm" style={{ color: "var(--fg-muted)" }}>
-              I&apos;m Luna - ask me about services, lead qualification, proposals, content strategy, or anything agency-related.
+              I&apos;m Avena - ask me about services, lead qualification, proposals, content strategy, or anything agency-related.
             </p>
 
             <style>{`
@@ -1003,7 +997,7 @@ export default function ChatPage() {
                     className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center overflow-hidden rounded-full sm:h-8 sm:w-8"
                     style={{ background: "var(--bg-subtle)", border: "1px solid var(--border)" }}
                   >
-                    <Image src="/logo.png" alt="Luna" width={28} height={28} className="object-contain" />
+                    <Image src="/logo.png" alt="Avena" width={28} height={28} className="object-contain" />
                   </div>
                 )}
 
@@ -1021,7 +1015,7 @@ export default function ChatPage() {
                       <span className="thinking-dot-2 h-2 w-2 rounded-full bg-indigo-400" />
                       <span className="thinking-dot-3 h-2 w-2 rounded-full bg-indigo-400" />
                       <span className="ml-1.5 text-xs" style={{ color: "var(--fg-subtle)" }}>
-                        Luna is thinking...
+                        Avena is thinking...
                       </span>
                     </div>
                   ) : message.role === "assistant" ? (
@@ -1094,7 +1088,7 @@ export default function ChatPage() {
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={handleKey}
-              placeholder="Message Luna..."
+              placeholder="Message Avena..."
               disabled={loading}
               rows={1}
               className="max-h-32 flex-1 resize-none overflow-y-auto bg-transparent text-sm leading-normal focus:outline-none sm:max-h-40"
@@ -1133,11 +1127,11 @@ export default function ChatPage() {
             )}
           </div>
           <p className="mt-1.5 hidden text-center text-xs sm:mt-2 sm:block" style={{ color: "var(--fg-subtle)" }}>
-            Luna can make mistakes. Please verify important details.
+            Avena can make mistakes. Please verify important details.
           </p>
           <p className="mt-1 text-center text-[11px] sm:hidden" style={{ color: "var(--fg-subtle)" }}>
             <Sparkles className="mr-1 inline h-3 w-3" />
-            Luna can make mistakes. Please verify key details.
+            Avena can make mistakes. Please verify key details.
           </p>
         </div>
       </div>

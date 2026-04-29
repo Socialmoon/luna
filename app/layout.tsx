@@ -3,7 +3,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 
 export const metadata: Metadata = {
-  title: "Luna - AI by SocialMoon",
+  title: "Avena - AI by SocialMoon",
   description: "AI-powered marketing agency automation platform",
   icons: {
     icon: "/logo.png",
