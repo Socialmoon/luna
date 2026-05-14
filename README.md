@@ -5,7 +5,7 @@
 
   **Private Repository — Internal Use Only**
 
-  AI-powered sales chat for SocialMoon agency. Visitors talk to Luna, our AI assistant, who answers questions about services, pricing, and case studies — and automatically captures leads into the database.
+  AI-powered sales chat for SocialMoon agency. Visitors talk to Avena, our AI assistant, who answers questions about services and case studies — and automatically captures leads into the database.
 
   ![Next.js](https://img.shields.io/badge/Next.js-15-black?style=flat-square&logo=next.js)
   ![OpenRouter](https://img.shields.io/badge/OpenRouter-Claude%20Sonnet-blueviolet?style=flat-square)
@@ -18,14 +18,14 @@
 
 ## What It Does
 
-Visitors open the chat, ask about SocialMoon's services (SEO, paid ads, social media, web design), and get instant, knowledgeable responses from Luna. Behind the scenes, any contact details shared during the conversation are silently extracted and stored as leads in Supabase — no forms required.
+Visitors open the chat, ask about SocialMoon's services (SEO, paid ads, social media, web design), and get instant, knowledgeable responses from Avena. When specific needs emerge, Avena connects them with the team. Contact details shared during the conversation are silently extracted and stored as leads in Supabase — no forms required.
 
 ---
 
 ## Features
 
-- **Voice Agent** — Users can speak to Luna with browser speech recognition when available, and a recording-based transcription fallback keeps voice usable on unsupported browsers
-- **Negotiation-Aware Responses** — Luna handles pricing discussions and identifies negotiation intent
+- **Voice Agent** — Users can speak to Avena with browser speech recognition when available, and a recording-based transcription fallback keeps voice usable on unsupported browsers
+- **Team Connection** — When users have specific needs, Avena connects them with the team for personalized solutions
 - **Auto Session Tracking** — Captures topic, latest query, negotiation flag, and contact details from each conversation
 - **Admin Dashboard** — `/leads` view shows tracked conversation sessions and captured contact info
 - **Light / Dark / System Theme** — Three-way toggle, respects OS preference by default
@@ -109,7 +109,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) — you should see the Luna chat interface.
+Open [http://localhost:3000](http://localhost:3000) — you should see the Avena chat interface.
 
 ### 4. Deploy to Vercel
 
@@ -148,7 +148,7 @@ See [.env.example](.env.example) for the full list. Required keys:
 
 | Use                | Model                           | Notes                                           |
 | ------------------ | ------------------------------- | ----------------------------------------------- |
-| Chat (Luna)        | ``anthropic/claude-sonnet-4-5`` | Primary — best quality for sales conversations |
+| Chat (Avena)       | ``anthropic/claude-sonnet-4-5`` | Primary — best quality for sales conversations |
 | Fast / background  | ``google/gemini-2.0-flash-001`` | Available for lower-cost tasks                  |
 | Advanced reasoning | ``anthropic/claude-opus-4``     | Reserved for future complex workflows           |
 

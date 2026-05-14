@@ -9,8 +9,8 @@ import OpenAI from "openai";
 //   baseURL: "https://openrouter.ai/api/v1",
 //   apiKey: process.env.OPENROUTER_API_KEY,
 //   defaultHeaders: {
-//     "X-Title": "Luna by SocialMoon",
-//     "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL ?? "https://luna.socialmoon.com",
+//     "X-Title": "Avena by SocialMoon",
+//     "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL ?? "https://avena.socialmoon.com",
 //   },
 // });
 

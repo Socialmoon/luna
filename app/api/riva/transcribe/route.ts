@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
 
   const language = typeof languageEntry === "string" && languageEntry.trim() ? languageEntry.trim().slice(0, 32) : "en-US";
   const upstream = new FormData();
-  upstream.set("file", fileEntry, fileEntry.name || "luna-voice.wav");
+  upstream.set("file", fileEntry, fileEntry.name || "avena-voice.wav");
   upstream.set("language", language);
 
   const response = await fetch(endpoint, {

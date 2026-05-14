@@ -2,7 +2,21 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import Image from "next/image";
-import { ArrowUp, Sparkles } from "lucide-react";
+import {
+  ArrowUp,
+  BarChart3,
+  CalendarCheck,
+  Globe2,
+  Mail,
+  Megaphone,
+  Palette,
+  Plus,
+  Search,
+  Sparkles,
+  Square,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { AppLogo } from "@/components/app-logo";
 import { recordAudioUntilSilence } from "@/lib/audio-recorder";
@@ -76,7 +90,7 @@ function renderMarkdown(text: string) {
 const ROW1 = [
   "How do you scale paid ads profitably?",
   "What ROI can I realistically expect?",
-  "How much does SocialMoon cost?",
+  "How can I get started with SocialMoon?",
   "Do you work with early-stage startups?",
   "Can you help with Google Ads specifically?",
   "What's your approach to brand strategy?",
@@ -91,8 +105,79 @@ const ROW2 = [
   "What does a discovery call look like?",
   "Do you handle social media content creation?",
   "What platforms do you run ads on?",
-  "Is pricing negotiable for startups?",
+  "Can you connect me with your team?",
   "How do you measure campaign success?",
+];
+
+const SOCIALMOON_FACTS = [
+  "Growth strategy",
+  "Lead generation",
+  "Brand systems",
+  "Conversion-focused websites",
+];
+
+const SERVICE_CARDS: Array<{
+  title: string;
+  description: string;
+  prompt: string;
+  icon: LucideIcon;
+  accent: string;
+}> = [
+  {
+    title: "Paid Ads",
+    description: "Google, Meta, funnel structure, offers, creatives, and performance review.",
+    prompt: "Build me a paid ads plan for my business",
+    icon: Megaphone,
+    accent: "#f97316",
+  },
+  {
+    title: "SEO + Content",
+    description: "Audits, keyword strategy, content plans, local SEO, and practical priorities.",
+    prompt: "What would a SocialMoon SEO audit include?",
+    icon: Search,
+    accent: "#10b981",
+  },
+  {
+    title: "Brand Strategy",
+    description: "Positioning, message clarity, identity direction, and cross-channel consistency.",
+    prompt: "Help me clarify my brand positioning",
+    icon: Palette,
+    accent: "#ec4899",
+  },
+  {
+    title: "Web + CRO",
+    description: "Landing pages, conversion copy, lead capture flows, and user journey fixes.",
+    prompt: "How can SocialMoon improve my landing page?",
+    icon: Globe2,
+    accent: "#0ea5e9",
+  },
+];
+
+const QUICK_ACTIONS: Array<{
+  label: string;
+  prompt: string;
+  icon: LucideIcon;
+}> = [
+  {
+    label: "Get a growth plan",
+    prompt: "Create a practical SocialMoon growth plan for my business",
+    icon: BarChart3,
+  },
+  {
+    label: "Qualify my lead needs",
+    prompt: "Ask me the right questions to understand my lead generation needs",
+    icon: Users,
+  },
+  {
+    label: "Prepare a discovery call",
+    prompt: "What should I prepare before a SocialMoon discovery call?",
+    icon: CalendarCheck,
+  },
+  {
+    label: "Connect with the team",
+    prompt: "I want to connect with the SocialMoon team",
+    icon: Mail,
+  },
 ];
 
 function normalizeLanguageTag(language: string | undefined) {
@@ -239,21 +324,15 @@ export default function ChatPage() {
     const latestAssistant = [...messages].reverse().find((message) => message.role === "assistant")?.content.toLowerCase() ?? "";
     const isHindi = activeLanguage === "hi-IN";
 
-    if (/price|pricing|budget|quote|cost/.test(latestAssistant)) {
-      return isHindi
-        ? ["Mere budget ke hisaab se best plan batao", "Kitne time mein result aayega?", "Kya flexible package possible hai?"]
-        : ["Suggest the best plan for my budget", "How soon can I expect results?", "Is there a flexible package option?"];
-    }
-
     if (/seo|ads|campaign|lead|social/.test(latestAssistant)) {
       return isHindi
-        ? ["Mere business ke liye first step kya hoga?", "Expected monthly budget kitna hona chahiye?", "Team se call schedule karna hai"]
-        : ["What should be my first step?", "What monthly budget do you recommend?", "I want to schedule a call with your team"];
+        ? ["Mere business ke liye first step kya hoga?", "Mujhe team se baat karni hai", "Team se call schedule karna hai"]
+        : ["What should be my first step?", "I want to talk to your team", "Can we schedule a call?"];
     }
 
     return isHindi
-      ? ["Mere business ke liye custom strategy do", "Pricing range share karo", "Mujhe team callback chahiye"]
-      : ["Give me a custom strategy for my business", "Share your pricing range", "I want a team callback"];
+      ? ["Mere business ke liye custom strategy do", "Mujhe team se baat karni hai", "Kya follow-up call schedule kar sakte ho?"]
+      : ["Give me a custom strategy for my business", "I want to talk to your team", "Can we schedule a follow-up call?"];
   }
 
   function createFreshSession() {
@@ -553,7 +632,7 @@ export default function ChatPage() {
 
       setVoicePhase("thinking");
       const formData = new FormData();
-      formData.set("file", audioBlob, "luna-voice.wav");
+      formData.set("file", audioBlob, "avena-voice.wav");
       formData.set("language", activeLanguageRef.current);
 
       const response = await fetch("/api/riva/transcribe", {
@@ -878,14 +957,31 @@ export default function ChatPage() {
         .thinking-dot-2 { animation: thinking-dot 1.2s ease-in-out infinite 200ms; }
         .thinking-dot-3 { animation: thinking-dot 1.2s ease-in-out infinite 400ms; }
       `}</style>
-      <header className="flex items-center justify-between px-4 py-2.5 sm:px-6 sm:py-3" style={{ borderBottom: "1px solid var(--border)" }}>
-        <div className="flex items-center gap-2">
-          <AppLogo height={22} />
-          <span className="hidden text-xs sm:block" style={{ color: "var(--fg-subtle)" }}>
-            AI Assistant
-          </span>
+      <header
+        className="flex items-center justify-between gap-3 px-3 py-2.5 sm:px-5 sm:py-3"
+        style={{ borderBottom: "1px solid var(--border)", background: "color-mix(in srgb, var(--bg) 94%, transparent)" }}
+      >
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div
+            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl"
+            style={{ background: "var(--bg-subtle)", border: "1px solid var(--border)" }}
+          >
+            <AppLogo height={22} />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="truncate text-sm font-semibold sm:text-base">Avena</span>
+              <span className="hidden rounded-full px-2 py-0.5 text-[11px] font-medium sm:inline-flex" style={{ background: "var(--bg-subtle)", color: "var(--fg-muted)" }}>
+                SocialMoon
+              </span>
+            </div>
+            <div className="mt-0.5 flex items-center gap-1.5 text-[11px] sm:text-xs" style={{ color: "var(--fg-subtle)" }}>
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              <span className="truncate">Growth assistant</span>
+            </div>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-shrink-0 items-center gap-1.5 sm:gap-2">
           <ThemeToggle />
           {!isEmpty ? (
             <button
@@ -900,17 +996,21 @@ export default function ChatPage() {
                 createFreshSession();
                 window.setTimeout(() => inputRef.current?.focus(), 50);
               }}
-              className="text-xs px-2.5 py-1.5 rounded-lg transition-colors"
-              style={{ color: "var(--fg-muted)" }}
+              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl px-2.5 text-xs font-medium transition-colors sm:px-3"
+              style={{ background: "var(--bg-subtle)", border: "1px solid var(--border)", color: "var(--fg-muted)" }}
               onMouseEnter={(event) => {
-                event.currentTarget.style.background = "var(--bg-subtle)";
+                event.currentTarget.style.background = "var(--bg-muted)";
+                event.currentTarget.style.color = "var(--fg)";
               }}
               onMouseLeave={(event) => {
-                event.currentTarget.style.background = "transparent";
+                event.currentTarget.style.background = "var(--bg-subtle)";
+                event.currentTarget.style.color = "var(--fg-muted)";
               }}
+              aria-label="Start a new chat"
+              title="Start a new chat"
             >
+              <Plus className="h-4 w-4" />
               <span className="hidden sm:inline">New chat</span>
-              <span className="sm:hidden">X</span>
             </button>
           ) : null}
         </div>
@@ -920,12 +1020,83 @@ export default function ChatPage() {
         {/* Voice agent temporarily disabled until interruption handling is finalized. */}
 
         {isEmpty ? (
-          <div className="flex h-full flex-col items-center justify-center pb-28 sm:pb-32">
-            <AppLogo height={36} className="mb-4 sm:mb-6" />
-            <h1 className="mb-2 px-4 text-center text-xl font-semibold sm:text-2xl">How can I help you today?</h1>
-            <p className="mb-8 max-w-xs px-4 text-center text-sm sm:mb-10 sm:max-w-sm" style={{ color: "var(--fg-muted)" }}>
-              I&apos;m Luna - ask me about services, lead qualification, proposals, content strategy, or anything agency-related.
+          <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col items-center justify-start px-3 pb-24 pt-5 sm:justify-center sm:px-4 sm:pb-28 sm:pt-8">
+            <div className="mb-3 flex items-center gap-2 rounded-full px-3 py-1.5 sm:mb-4 sm:gap-3 sm:py-2" style={{ background: "var(--bg-subtle)", border: "1px solid var(--border)" }}>
+              <AppLogo height={22} />
+              <span className="text-xs font-medium" style={{ color: "var(--fg-muted)" }}>
+                Avena by SocialMoon
+              </span>
+            </div>
+            <h1 className="max-w-3xl px-1 text-center text-2xl font-semibold leading-tight sm:px-2 sm:text-4xl">
+              Turn your marketing questions into a clearer growth plan.
+            </h1>
+            <p className="mt-2 max-w-2xl px-1 text-center text-xs leading-5 sm:mt-3 sm:px-2 sm:text-base sm:leading-6" style={{ color: "var(--fg-muted)" }}>
+              Ask Avena about SocialMoon&apos;s ads, SEO, branding, websites, funnels, and lead generation.
             </p>
+
+            <div className="mt-3 flex flex-wrap justify-center gap-1.5 sm:mt-4 sm:gap-2">
+              {SOCIALMOON_FACTS.map((fact) => (
+                <span
+                  key={fact}
+                  className="rounded-full px-2.5 py-1 text-[11px] font-medium sm:px-3 sm:py-1.5 sm:text-sm"
+                  style={{ background: "var(--bg-subtle)", border: "1px solid var(--border)", color: "var(--fg-muted)" }}
+                >
+                  {fact}
+                </span>
+              ))}
+            </div>
+
+            <div className="mt-4 grid w-full grid-cols-2 gap-2 sm:mt-6 sm:gap-3 lg:grid-cols-4">
+              {SERVICE_CARDS.map((service) => {
+                const Icon = service.icon;
+                return (
+                  <button
+                    key={service.title}
+                    onClick={() => void send(service.prompt)}
+                    className="group min-h-28 rounded-lg p-3 text-left transition-all duration-150 hover:-translate-y-0.5 sm:min-h-32 sm:p-3.5"
+                    style={{ background: "var(--panel)", border: "1px solid var(--border)", boxShadow: "0 14px 34px rgba(15, 23, 42, 0.06)" }}
+                  >
+                    <span
+                      className="mb-2 flex h-8 w-8 items-center justify-center rounded-lg transition-transform duration-150 group-hover:scale-105 sm:mb-2.5 sm:h-9 sm:w-9"
+                      style={{ background: `${service.accent}18`, color: service.accent }}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    <span className="block text-xs font-semibold sm:text-sm" style={{ color: "var(--fg)" }}>
+                      {service.title}
+                    </span>
+                    <span className="mt-1.5 block overflow-hidden text-[11px] leading-4 sm:mt-2 sm:text-xs sm:leading-5" style={{ color: "var(--fg-muted)", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical" }}>
+                      {service.description}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-3 grid w-full grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-center">
+              {QUICK_ACTIONS.map((action) => {
+                const Icon = action.icon;
+                return (
+                  <button
+                    key={action.label}
+                    onClick={() => void send(action.prompt)}
+                    className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full px-2.5 py-1.5 text-center text-[11px] font-medium transition-colors sm:gap-2 sm:px-3 sm:py-2 sm:text-sm"
+                    style={{ background: "var(--bg-subtle)", border: "1px solid var(--border)", color: "var(--fg-muted)" }}
+                    onMouseEnter={(event) => {
+                      event.currentTarget.style.background = "var(--bg-muted)";
+                      event.currentTarget.style.color = "var(--fg)";
+                    }}
+                    onMouseLeave={(event) => {
+                      event.currentTarget.style.background = "var(--bg-subtle)";
+                      event.currentTarget.style.color = "var(--fg-muted)";
+                    }}
+                  >
+                    <Icon className="h-3.5 w-3.5 flex-shrink-0 sm:h-4 sm:w-4" />
+                    {action.label}
+                  </button>
+                );
+              })}
+            </div>
 
             <style>{`
               @keyframes marquee-left  { from { transform: translateX(0) } to { transform: translateX(-50%) } }
@@ -937,7 +1108,7 @@ export default function ChatPage() {
             `}</style>
 
             <div
-              className="marquee-wrap w-full space-y-2.5 overflow-hidden sm:space-y-3"
+              className="marquee-wrap mt-5 hidden w-full space-y-2.5 overflow-hidden sm:block sm:space-y-3"
               style={{
                 maskImage: "linear-gradient(to right, transparent 0%, black 8%, black 92%, transparent 100%)",
                 WebkitMaskImage: "linear-gradient(to right, transparent 0%, black 8%, black 92%, transparent 100%)",
@@ -1003,7 +1174,7 @@ export default function ChatPage() {
                     className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center overflow-hidden rounded-full sm:h-8 sm:w-8"
                     style={{ background: "var(--bg-subtle)", border: "1px solid var(--border)" }}
                   >
-                    <Image src="/logo.png" alt="Luna" width={28} height={28} className="object-contain" />
+                    <Image src="/logo.png" alt="Avena" width={28} height={28} className="object-contain" />
                   </div>
                 )}
 
@@ -1021,7 +1192,7 @@ export default function ChatPage() {
                       <span className="thinking-dot-2 h-2 w-2 rounded-full bg-indigo-400" />
                       <span className="thinking-dot-3 h-2 w-2 rounded-full bg-indigo-400" />
                       <span className="ml-1.5 text-xs" style={{ color: "var(--fg-subtle)" }}>
-                        Luna is thinking...
+                        Avena is thinking...
                       </span>
                     </div>
                   ) : message.role === "assistant" ? (
@@ -1094,7 +1265,7 @@ export default function ChatPage() {
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={handleKey}
-              placeholder="Message Luna..."
+              placeholder="Message Avena..."
               disabled={loading}
               rows={1}
               className="max-h-32 flex-1 resize-none overflow-y-auto bg-transparent text-sm leading-normal focus:outline-none sm:max-h-40"
@@ -1118,7 +1289,7 @@ export default function ChatPage() {
                 aria-label="Stop generating"
                 title="Stop generating"
               >
-                ■
+                <Square className="h-3.5 w-3.5 fill-current" />
               </button>
             ) : (
               <button
@@ -1133,11 +1304,11 @@ export default function ChatPage() {
             )}
           </div>
           <p className="mt-1.5 hidden text-center text-xs sm:mt-2 sm:block" style={{ color: "var(--fg-subtle)" }}>
-            Luna can make mistakes. Please verify important details.
+            Avena can make mistakes. Please verify important details.
           </p>
           <p className="mt-1 text-center text-[11px] sm:hidden" style={{ color: "var(--fg-subtle)" }}>
             <Sparkles className="mr-1 inline h-3 w-3" />
-            Luna can make mistakes. Please verify key details.
+            Avena can make mistakes. Please verify key details.
           </p>
         </div>
       </div>
