@@ -16,6 +16,30 @@ let supabasePauseWasLogged = false;
 
 const SYSTEM_PROMPT = `You are Avena, SocialMoon's friendly AI growth consultant.
 
+SocialMoon context:
+- SocialMoon is a digital growth and creative marketing agency focused on helping businesses attract better leads, improve conversions, and build a stronger brand presence.
+- Avena is the SocialMoon assistant, not a separate agency. Always introduce yourself as Avena from SocialMoon when the user asks who you are.
+- Core service areas include paid advertising, SEO, social media strategy, content planning, branding, website and landing page improvements, conversion rate optimization, email marketing, automation, campaign planning, lead qualification, onboarding support, and strategy guidance.
+- Paid advertising support can include Google Ads, Meta/Facebook/Instagram campaigns, funnel planning, audience strategy, offer positioning, campaign structure, creative direction, landing page alignment, and performance review.
+- SEO support can include audits, keyword strategy, content planning, technical SEO guidance, local SEO direction, page improvements, and practical prioritization.
+- Social media support can include content calendars, platform strategy, campaign ideas, brand voice, creator-style content direction, and performance-led posting plans.
+- Branding support can include positioning, messaging, identity direction, value proposition clarity, and consistent communication across website, ads, and social channels.
+- Website support can include landing page strategy, conversion copy, user journey improvements, lead capture flows, trust signals, and handoff recommendations for the team.
+- SocialMoon's working style is strategic, consultative, and outcome-focused: understand the business goal, current channels, audience, timeline, and what success should look like before recommending next steps.
+- SocialMoon can support early-stage startups, growing local businesses, service businesses, creators, ecommerce brands, and teams that need clearer acquisition systems.
+- Completed project context Avena can share at a high level:
+  - SocialMoon has worked on growth and marketing builds across paid ads, SEO/content, social media planning, brand positioning, landing pages, websites, funnels, and lead capture systems.
+  - Common completed project types include ad campaign setup and optimization, SEO audits, content calendars, landing page/CRO improvements, brand messaging refreshes, website improvements, social media growth plans, and lead generation workflows.
+  - When someone asks about completed projects, describe relevant project types and the kind of work delivered. Do not invent client names, industries, dates, screenshots, revenue, ROAS, ranking improvements, or exact results.
+  - If the visitor wants proof, portfolio details, or case studies, say the SocialMoon team can share suitable examples directly and ask whether they want the team to follow up.
+- Team context Avena can share:
+  - SocialMoon works through a compact growth team covering strategy, paid ads, SEO/content, social media, branding/design direction, website/CRO, automation, lead qualification, and client support.
+  - The team approach is collaborative: strategy clarifies the goal, channel specialists plan and execute campaigns, creative/web support improves the conversion path, and support/operations help with follow-up and onboarding.
+  - If asked for a specific person's name, role, direct phone number, private email, or internal structure that is not provided in this prompt, do not invent it. Offer to connect them with the right SocialMoon team member instead.
+- For results, speak in realistic ranges or principles only when useful. Never invent client names, revenue numbers, ROAS, rankings, case studies, deadlines, or guarantees.
+- Never discuss pricing, costs, quotes, discounts, retainers, or package prices. If asked, politely say Avena cannot discuss pricing and offer to connect them with the SocialMoon team.
+- If a visitor sounds ready to talk, collect email and phone naturally so the SocialMoon team can follow up.
+
 Goals:
 - Help visitors with marketing strategy, services, and timelines.
 - Be concise, clear, and practical.
@@ -36,7 +60,7 @@ Goals:
 - Be proactively consultative: understand the user's goal, expectations, and timeline gradually through natural conversation.
 - Ask only one discovery question at a time, and only after giving some useful value first.
 - Never sound pushy, desperate, or salesy; keep discovery light and respectful.
-- When pricing or specific packages come up, always suggest contacting the team for personalized options.
+- When pricing, costs, quotes, discounts, retainers, or packages come up, do not answer with amounts, ranges, estimates, or comparisons. Politely say Avena cannot discuss pricing and offer to connect them with the SocialMoon team.
 - When the user seems interested in moving forward, ask for contact details (email + phone).
 - If user reports a problem, ask for contact details so the team can follow up.
 - Reply in Hindi if the user's latest message is in Hindi, otherwise reply in English.
@@ -89,8 +113,18 @@ const SOCIALMOON_RELEVANT_KEYWORDS = [
   "content",
   "organic",
   "campaign",
+  "case study",
+  "case studies",
+  "portfolio",
+  "projects",
+  "completed projects",
+  "past work",
+  "previous work",
+  "team",
+  "team info",
+  "who works",
+  "specialist",
   "strategy",
-  "package",
   "service",
   "services",
   "agency",
@@ -107,9 +141,14 @@ const SOCIALMOON_RELEVANT_KEYWORDS = [
   "\u090f\u0938\u0908\u0913",
   "\u0935\u0947\u092c\u0938\u093e\u0907\u091f",
   "\u092c\u094d\u0930\u093e\u0902\u0921",
-  "\u0915\u0940\u092e\u0924",
-  "\u092a\u094d\u0930\u093e\u0907\u0938",
   "\u0938\u0930\u094d\u0935\u093f\u0938",
+];
+
+const PRICING_PATTERNS = [
+  /\b(pric(?:e|ing)|cost|charge|fee|rate|quote|quotation|package|plan price|retainer|discount|deal|negotiate|best price|lower (the )?price|can you reduce|how much|what do you charge|monthly fee|per month)\b/i,
+  /(?:₹|\$|rs\.?|inr|usd)\s?\d+/i,
+  /(?:\d+)\s?(?:rs|inr|usd|dollars?|rupees?)/i,
+  /(?:\u0915\u0940\u092e\u0924|\u092a\u094d\u0930\u093e\u0907\u0938|\u0926\u093e\u092e|\u091a\u093e\u0930\u094d\u091c|\u092b\u0940\u0938|\u092a\u0948\u0915\u0947\u091c|\u0921\u093f\u0938\u094d\u0915\u093e\u0909\u0902\u091f|\u0915\u092e \u0915\u0930|\u091b\u0942\u091f|\u0938\u0938\u094d\u0924\u093e)/i,
 ];
 
 const OFF_TOPIC_PATTERNS = [
@@ -150,6 +189,10 @@ function extractName(text: string): string | null {
 
 function detectNegotiation(text: string): boolean {
   return /(discount|negotiate|best price|lower (the )?price|deal|can you reduce|\u0915\u092e \u0915\u0930|\u091b\u0942\u091f|\u0921\u093f\u0938\u094d\u0915\u093e\u0909\u0902\u091f|\u0938\u0938\u094d\u0924\u093e|\u092c\u0947\u0938\u094d\u091f \u092a\u094d\u0930\u093e\u0907\u0938)/i.test(text);
+}
+
+function isPricingInquiry(text: string) {
+  return PRICING_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 function isHindiText(text: string) {
@@ -248,10 +291,18 @@ function isSocialMoonRelevant(messages: SanitizedMessage[]) {
 
 function buildOffTopicResponse(latestMessage: string) {
   if (isHindiText(latestMessage)) {
-    return "\u092e\u0948\u0902 \u0938\u093f\u0930\u094d\u092b SocialMoon \u0915\u0940 \u0938\u0930\u094d\u0935\u093f\u0938\u0947\u091c, marketing strategy, ads, SEO, website, branding \u092f\u093e support se jude sawaalon mein madad kar sakti \u0939\u0942\u0902. Pricing aur packages ke liye hamare team se contact karein. Aap apna sawaal SocialMoon ya aapke business marketing goals se related poochiye.";
+    return "\u092e\u0948\u0902 \u0938\u093f\u0930\u094d\u092b SocialMoon \u0915\u0940 \u0938\u0930\u094d\u0935\u093f\u0938\u0947\u091c, marketing strategy, ads, SEO, website, branding \u092f\u093e support se jude sawaalon mein madad kar sakti \u0939\u0942\u0902. Aap apna sawaal SocialMoon ya aapke business marketing goals se related poochiye.";
   }
 
-  return "I can only help with SocialMoon-related questions like services, marketing strategy, ads, SEO, websites, branding, or support. For pricing and packages, please reach out to our team. Ask anything related to SocialMoon or your business growth needs.";
+  return "I can only help with SocialMoon-related questions like services, marketing strategy, ads, SEO, websites, branding, or support. Ask anything related to SocialMoon or your business growth needs.";
+}
+
+function buildPricingResponse(latestMessage: string) {
+  if (isHindiText(latestMessage)) {
+    return "Main pricing, packages, discounts, ya quotes discuss nahi kar sakti. Main aapki marketing needs samajhne mein help kar sakti hoon aur agar aap chahein to SocialMoon team se follow-up ke liye aapka email aur phone le sakti hoon.";
+  }
+
+  return "I can't discuss pricing, packages, discounts, or quotes here. I can help clarify your marketing needs and, if you want, collect your email and phone so the SocialMoon team can follow up.";
 }
 
 function getUserMessages(messages: SanitizedMessage[]) {
@@ -331,19 +382,19 @@ function needsClarifyingQuestion(latestUserMessage: string) {
   const lower = latestUserMessage.toLowerCase();
   if (lower.length < 14) return true;
 
-  const explicitQuestionSignals = ["how", "what", "why", "which", "package", "help", "strategy"];
+  const explicitQuestionSignals = ["how", "what", "why", "which", "help", "strategy"];
   const hasSignal = explicitQuestionSignals.some((signal) => lower.includes(signal));
-  const hasSpecificData = /(google ads|meta ads|seo|website|landing page|social media|branding|budget|timeline|industry)/i.test(lower);
+  const hasSpecificData = /(google ads|meta ads|seo|website|landing page|social media|branding|timeline|industry|audience|goal)/i.test(lower);
 
   return !hasSignal || !hasSpecificData;
 }
 
-type DiscoveryField = "goal" | "expectation" | "budget" | "timeline";
+type DiscoveryField = "goal" | "expectation" | "audience" | "timeline";
 
 type DiscoverySnapshot = {
   goalKnown: boolean;
   expectationKnown: boolean;
-  budgetKnown: boolean;
+  audienceKnown: boolean;
   timelineKnown: boolean;
   assistantAskedDiscoveryRecently: boolean;
 };
@@ -361,17 +412,16 @@ function buildDiscoverySnapshot(messages: SanitizedMessage[]): DiscoverySnapshot
 
   const expectationKnown = /(expect|expectation|outcome|result|kpi|roi|roas|cpl|cac|benchmark|success looks like)/i.test(userText);
 
-  const budgetKnown =
-    /(budget|spend|ad spend|price range|range|per month|monthly|₹|\$|rs\.?\s?\d|inr\s?\d|usd\s?\d)/i.test(userText);
+  const audienceKnown = /(audience|customer|buyer|market|location|city|industry|niche|b2b|b2c|ecommerce|service business|local business)/i.test(userText);
 
   const timelineKnown = /(timeline|when|how soon|weeks?|months?|quarter|deadline|urgent|asap|by\s+[a-z]+)/i.test(userText);
 
-  const assistantAskedDiscoveryRecently = /(goal|expectation|budget|timeline|how soon|what result|what outcome).{0,50}\?/i.test(recentAssistantText);
+  const assistantAskedDiscoveryRecently = /(goal|expectation|audience|customer|timeline|how soon|what result|what outcome).{0,50}\?/i.test(recentAssistantText);
 
   return {
     goalKnown,
     expectationKnown,
-    budgetKnown,
+    audienceKnown,
     timelineKnown,
     assistantAskedDiscoveryRecently,
   };
@@ -380,7 +430,7 @@ function buildDiscoverySnapshot(messages: SanitizedMessage[]): DiscoverySnapshot
 function pickNextDiscoveryField(snapshot: DiscoverySnapshot): DiscoveryField | null {
   if (!snapshot.goalKnown) return "goal";
   if (!snapshot.expectationKnown) return "expectation";
-  if (!snapshot.budgetKnown) return "budget";
+  if (!snapshot.audienceKnown) return "audience";
   if (!snapshot.timelineKnown) return "timeline";
   return null;
 }
@@ -400,7 +450,7 @@ function buildDiscoveryInstruction(messages: SanitizedMessage[]) {
   const fieldPromptMap: Record<DiscoveryField, string> = {
     goal: "Ask one soft question to clarify their main business goal.",
     expectation: "Ask one soft question to clarify what outcome they expect.",
-    budget: "Ask one gentle budget-comfort question. If user avoids budget, offer broad ranges and move on.",
+    audience: "Ask one soft question to clarify their ideal audience or customer segment.",
     timeline: "Ask one soft question about desired timeline or urgency.",
   };
 
@@ -450,7 +500,7 @@ function buildConversationStateInstruction(messages: SanitizedMessage[]) {
       ? "- User request may be broad. Give a direct compact answer, then ask exactly one short clarifying question."
       : "- User request is specific enough. Give direct actionable guidance first, then optional next step.",
     negotiationDetected
-      ? "- User appears price-sensitive. Offer respectful flexibility without making fake promises."
+      ? "- User appears to be asking about pricing or negotiation. Do not discuss pricing. Offer to connect them with the SocialMoon team."
       : "- Keep recommendations practical and outcome-focused.",
     askForContact
       ? "- Ask politely for both email and phone at the end so the team can follow up."
@@ -541,10 +591,10 @@ async function generateAssistantReply(
 
 function buildFallbackResponse(latestUserMessage: string) {
   if (isHindiText(latestUserMessage)) {
-    return "Main aapki SocialMoon marketing query mein madad karne ke liye yahin hoon. Ek short clear answer dene ke liye please apna goal, current channel (SEO/Ads/Social), aur approx budget share kar dijiye.";
+    return "Main aapki SocialMoon marketing query mein madad karne ke liye yahin hoon. Ek short clear answer dene ke liye please apna goal, current channel (SEO/Ads/Social), aur timeline share kar dijiye.";
   }
 
-  return "I am here to help with your SocialMoon marketing query. To give you a precise next-step plan, please share your goal, current channel (SEO/Ads/Social), and approximate budget.";
+  return "I am here to help with your SocialMoon marketing query. To give you a precise next-step plan, please share your goal, current channel (SEO/Ads/Social), and timeline.";
 }
 
 async function extractInsightsWithAI(messages: SanitizedMessage[]): Promise<Partial<ConversationInsights>> {
@@ -743,6 +793,16 @@ export async function POST(req: NextRequest) {
   }
 
   const latestUserMessage = sanitized[sanitized.length - 1].content;
+  if (isPricingInquiry(latestUserMessage)) {
+    return new Response(buildPricingResponse(latestUserMessage), {
+      status: 200,
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  }
+
   if (!isSocialMoonRelevant(sanitized)) {
     return new Response(buildOffTopicResponse(latestUserMessage), {
       status: 200,

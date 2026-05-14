@@ -4,7 +4,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 
 export const metadata: Metadata = {
   title: "Avena - AI by SocialMoon",
-  description: "AI-powered marketing agency automation platform",
+  description: "Avena is SocialMoon's AI growth consultant for ads, SEO, branding, websites, funnels, and lead generation.",
   icons: {
     icon: "/logo.png",
     apple: "/logo.png",
